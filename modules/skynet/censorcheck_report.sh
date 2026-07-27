@@ -28,6 +28,17 @@ _CENSORCHECK_CRON_FILE="/etc/cron.d/reshala-censorcheck"
 #                        TELEGRAM                              #
 # ============================================================ #
 
+# Экранирует спецсимволы HTML в тексте, который подставляется внутрь
+# <b>/<blockquote> и т.п. (имена серверов из базы флота вводит сам
+# пользователь и не должны ломать разметку сообщения).
+_skynet_censorcheck_html_escape() {
+    local s="$1"
+    s="${s//&/&amp;}"
+    s="${s//</&lt;}"
+    s="${s//>/&gt;}"
+    printf '%s' "$s"
+}
+
 # Отправляет ОДИН кусок текста (<=4096 символов) в Telegram.
 # Печатает HTTP-код ответа в stdout.
 _skynet_censorcheck_tg_send_chunk() {
@@ -38,6 +49,7 @@ _skynet_censorcheck_tg_send_chunk() {
     curl -s -m 20 -X POST "https://api.telegram.org/bot${token}/sendMessage" \
         --data-urlencode "chat_id=${chat_id}" \
         --data-urlencode "text=${text}" \
+        --data-urlencode "parse_mode=HTML" \
         -o /dev/null -w '%{http_code}'
 }
 
@@ -156,24 +168,33 @@ _skynet_censorcheck_run_and_report() {
     local tmp_dir; tmp_dir=$(_skynet_run_plugin_on_fleet_parallel_capture "$_CENSORCHECK_PLUGIN")
     local count; count=$(cat "${tmp_dir}/.count" 2>/dev/null || echo 0)
 
-    local report="Блокировка ТСПУ — отчёт по флоту"$'\n'"$(date '+%Y-%m-%d %H:%M')"$'\n'
-    local total=0 failed=0 idx name status out short_out
+    # Доступные серверы - просто зелёная галочка, компактным списком.
+    # Недоступные - прячем в сворачиваемую (expandable) цитату Telegram,
+    # чтобы в обычный день отчёт был коротким списком из одних ✅.
+    local ok_list="" fail_list=""
+    local total=0 failed=0 idx name status esc_name
 
     for ((idx = 1; idx <= count; idx++)); do
         name=$(cat "${tmp_dir}/${idx}.name" 2>/dev/null)
         status=$(cat "${tmp_dir}/${idx}.status" 2>/dev/null)
         total=$((total + 1))
+        esc_name=$(_skynet_censorcheck_html_escape "$name")
 
         if [[ "$status" == "OK" ]]; then
-            # Обрезаем вывод, чтобы один "болтливый" сервер не съел весь отчёт
-            short_out=$(tail -c 600 "${tmp_dir}/${idx}.out" 2>/dev/null | tr -d '\r')
-            report+=$'\n'"✅ ${name}:"$'\n'"${short_out}"$'\n'
+            ok_list+="✅ ${esc_name}"$'\n'
         else
             failed=$((failed + 1))
-            report+=$'\n'"❌ ${name} — сервер недоступен или проверка не выполнена"
+            fail_list+="${esc_name}"$'\n'
         fi
     done
     rm -rf "$tmp_dir"
+
+    local report="🛡 <b>Блокировка ТСПУ — отчёт по флоту</b>"$'\n'"$(date '+%Y-%m-%d %H:%M')"$'\n\n'
+    report+="${ok_list}"
+
+    if [[ -n "$fail_list" ]]; then
+        report+=$'\n'"<blockquote expandable>❌ Недоступны (${failed}):"$'\n'"${fail_list}</blockquote>"$'\n'
+    fi
 
     report+=$'\n'"Итого: ${total} серверов, ${failed} недоступно."
 
