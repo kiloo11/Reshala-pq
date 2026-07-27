@@ -530,6 +530,41 @@ get_config_var() {
     fi
 }
 
+# --- Секреты (.env) ---
+# Отдельное хранилище для чувствительных значений (токены ботов, ключи
+# API и т.п.), физически отделённое от config/reshala.conf:
+#   - лежит в /etc/reshala, а НЕ в /opt/reshala, поэтому переживает
+#     переустановку/обновление Решалы (install_script/_perform_install_or_update
+#     полностью пересоздают /opt/reshala);
+#   - права 600, отдельно от общего конфига (который читается на 644).
+readonly RESHALA_ENV_FILE="/etc/reshala/.env"
+
+_ensure_env_file() {
+    if [[ ! -f "$RESHALA_ENV_FILE" ]]; then
+        run_cmd mkdir -p "$(dirname "$RESHALA_ENV_FILE")"
+        run_cmd touch "$RESHALA_ENV_FILE"
+    fi
+    run_cmd chmod 600 "$RESHALA_ENV_FILE"
+}
+
+set_env_var() {
+    local key="$1"
+    local value="$2"
+    _ensure_env_file
+    if grep -q "^${key}=" "$RESHALA_ENV_FILE" 2>/dev/null; then
+        run_cmd sed -i "s|^${key}=.*|${key}=\"${value}\"|" "$RESHALA_ENV_FILE"
+    else
+        echo "${key}=\"${value}\"" | run_cmd tee -a "$RESHALA_ENV_FILE" >/dev/null
+    fi
+}
+
+get_env_var() {
+    local key="$1"
+    if [ -f "$RESHALA_ENV_FILE" ]; then
+        grep "^${key}=" "$RESHALA_ENV_FILE" 2>/dev/null | cut -d'=' -f2- | sed 's/"//g'
+    fi
+}
+
 wait_for_enter() {
     read -rp $'\nНажми Enter, чтобы продолжить...' || return 130
 }

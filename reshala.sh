@@ -48,6 +48,12 @@ else
     exit 1
 fi
 
+# Подключаем секреты (.env), если он уже существует. Хранится в /etc/reshala,
+# отдельно от config/reshala.conf, поэтому переживает переустановку/обновление.
+if [ -f "$RESHALA_ENV_FILE" ]; then
+    source "$RESHALA_ENV_FILE"
+fi
+
 # Загружаем систему миграций
 if [ -f "${SCRIPT_DIR}/modules/utils/migrations.sh" ]; then
     source "${SCRIPT_DIR}/modules/utils/migrations.sh"
