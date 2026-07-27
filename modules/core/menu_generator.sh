@@ -181,8 +181,14 @@ render_menu_items() {
             echo ""
         fi
 
-        # Подставляем переменные цвета в название
-        eval "title=\"$title\""
+        # Подставляем переменные цвета в название (${C_XXX} -> реальный код цвета).
+        # Используем indirect expansion вместо eval: даже если в title попадёт
+        # что-то неожиданное, максимум, что можно получить — значение
+        # существующей переменной, а не выполнение произвольного кода.
+        while [[ "$title" =~ \$\{([A-Za-z_][A-Za-z0-9_]*)\} ]]; do
+            local _var_name="${BASH_REMATCH[1]}"
+            title="${title//\$\{${_var_name}\}/${!_var_name}}"
+        done
         
         printf_menu_option "$key" "$title"
         if [[ -n "$desc" ]]; then

@@ -57,6 +57,13 @@ _skynet_add_server_wizard() {
     s_pass="${s_pass//|/}"
 
     echo
+    if ! _skynet_confirm_and_pin_host_key "$s_ip" "$s_port"; then
+        printf_warning "Добавление сервера отменено."
+        wait_for_enter
+        return
+    fi
+
+    echo
     printf_info "Выбери SSH ключ для этого сервера:"
     printf_menu_option "1" "Использовать общий Мастер-ключ"
     printf_menu_option "2" "Создать новый УНИКАЛЬНЫЙ ключ"
@@ -102,29 +109,31 @@ _skynet_add_server_wizard() {
         printf_ok "Сервер '${s_name}' добавлен в флот."
         
         # Проверяем соединение и предлагаем усилить безопасность
-        if ssh -q -F /dev/null -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -i "$final_key" -p "$s_port" "${s_user}@${s_ip}" "echo OK" &>/dev/null; then
+        if ssh -q -F /dev/null -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new -i "$final_key" -p "$s_port" "${s_user}@${s_ip}" "echo OK" &>/dev/null; then
             printf_ok "Тестовое подключение по ключу прошло успешно."
             # Проверяем, уже ли выключен вход по паролю — не задаём лишний вопрос
             local _pw_auth
             _pw_auth=$(ssh -q -F /dev/null -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=5 \
-                -o StrictHostKeyChecking=no -i "$final_key" -p "$s_port" "${s_user}@${s_ip}" \
+                -o StrictHostKeyChecking=accept-new -i "$final_key" -p "$s_port" "${s_user}@${s_ip}" \
                 "sshd -T 2>/dev/null | grep -i '^passwordauthentication'" 2>/dev/null | awk '{print tolower($2)}')
             if [[ "$_pw_auth" == "no" ]]; then
                 printf_ok "Вход по паролю уже отключён на сервере ✓"
             elif ask_yes_no "Вырубаем вход по паролю и оставляем только ключи? (y/n)"; then
                 local harden_cmd="sed -i.bak -E 's/^#?PasswordAuthentication\s+.*/PasswordAuthentication no/' /etc/ssh/sshd_config && (systemctl reload sshd 2>/dev/null || systemctl reload ssh 2>/dev/null || service sshd restart 2>/dev/null || service ssh restart 2>/dev/null)"
+                local quoted_harden_cmd; printf -v quoted_harden_cmd '%q' "$harden_cmd"
                 if [[ "$s_user" == "root" ]]; then
-                    ssh -t -F /dev/null -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -i "$final_key" -p "$s_port" "${s_user}@${s_ip}" "$harden_cmd"
+                    ssh -t -F /dev/null -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -i "$final_key" -p "$s_port" "${s_user}@${s_ip}" "$harden_cmd"
                     stty sane
                 elif [[ -n "$s_pass" ]]; then
-                    ssh -t -F /dev/null -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -i "$final_key" -p "$s_port" "${s_user}@${s_ip}" "echo '$s_pass' | sudo -S -p '' bash -c '$harden_cmd'"
+                    # Пароль передаётся через stdin, а не вклеивается в текст команды (см. executor.sh).
+                    ssh -t -F /dev/null -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -i "$final_key" -p "$s_port" "${s_user}@${s_ip}" "sudo -S -p '' bash -c ${quoted_harden_cmd}" <<< "$s_pass"
                     stty sane
                 else
                     # Пробуем NOPASSWD sudo
                     if ssh -q -F /dev/null -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=5 \
-                           -o StrictHostKeyChecking=no -i "$final_key" -p "$s_port" "${s_user}@${s_ip}" \
+                           -o StrictHostKeyChecking=accept-new -i "$final_key" -p "$s_port" "${s_user}@${s_ip}" \
                            "sudo -n true" 2>/dev/null; then
-                        ssh -t -F /dev/null -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -i "$final_key" -p "$s_port" "${s_user}@${s_ip}" "sudo -n bash -c '$harden_cmd'"
+                        ssh -t -F /dev/null -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -i "$final_key" -p "$s_port" "${s_user}@${s_ip}" "sudo -n bash -c ${quoted_harden_cmd}"
                         stty sane
                     else
                         printf_warning "Пароль sudo не указан — пропускаю."
@@ -169,7 +178,10 @@ _skynet_toggle_autoscan() { local a; a=$(get_config_var "SKYNET_AUTO_SSH_SCAN" "
 #                ГЛАВНОЕ МЕНЮ УПРАВЛЕНИЯ ФЛОТОМ                #
 # ============================================================ #
 show_fleet_menu() {
-    touch "$FLEET_DATABASE_FILE"; enable_graceful_ctrlc
+    touch "$FLEET_DATABASE_FILE"
+    # Файл содержит пароли sudo/SSH в открытом виде — доступ только для владельца.
+    chmod 600 "$FLEET_DATABASE_FILE" 2>/dev/null
+    enable_graceful_ctrlc
     
     local tmp_dir; tmp_dir=$(mktemp -d)
     local pids=() # Массив для хранения PID-ов фоновых процессов
@@ -186,10 +198,14 @@ show_fleet_menu() {
                 if [[ ! -f "$tmp_dir/$i" ]]; then
                     echo "..." > "$tmp_dir/$i"
                     IFS='|' read -r _ user ip port key _ <<< "$line"
-                    # Лечим ключ хоста перед проверкой
-                    _skynet_heal_host_key "$ip" "$port"
+                    # НЕ лечим ключ хоста перед пассивной проверкой статуса: heal
+                    # стирает известный fingerprint сервера, из-за чего проверка
+                    # никогда не заметит реальную подмену хоста (MITM). Если
+                    # fingerprint реально сменился (переустановка сервера),
+                    # проверка просто покажет "OFF" — лечение делается явно
+                    # при подключении (_sm_connect) или добавлении сервера.
                     # Запускаем в фоне и сохраняем PID
-                    ( timeout 3 ssh -n -q -F /dev/null -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=3 -o StrictHostKeyChecking=no -i "$key" -p "$port" "$user@$ip" exit &>/dev/null && echo "ON" > "$tmp_dir/$i" || echo "OFF" > "$tmp_dir/$i" ) &
+                    ( timeout 3 ssh -n -q -F /dev/null -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=3 -o StrictHostKeyChecking=accept-new -i "$key" -p "$port" "$user@$ip" exit &>/dev/null && echo "ON" > "$tmp_dir/$i" || echo "OFF" > "$tmp_dir/$i" ) &
                     pids+=($!)
                 fi
                 ((i++))
@@ -233,7 +249,7 @@ show_fleet_menu() {
             break
         else
             local action; action=$(get_menu_action "skynet" "$choice")
-            if [[ -n "$action" ]]; then eval "$action"; else
+            if [[ -n "$action" ]]; then $action; else
                 info "Обновляю статусы..."; sleep 0.5
             fi
         fi
@@ -257,14 +273,18 @@ _show_server_management_menu() {
         printf_info "🚀 SKYNET UPLINK: Подключаюсь к ${s_name}..."
 
         # Проверяем, работает ли вход по ключу.
-        if ! ssh -q -F /dev/null -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -i "$s_key" -p "$s_port" "${s_user}@${s_ip}" exit; then
+        if ! ssh -q -F /dev/null -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new -i "$s_key" -p "$s_port" "${s_user}@${s_ip}" exit; then
             printf_warning "Не удалось войти по ключу. Возможно, сервер был переустановлен."
             if ask_yes_no "Хочешь закинуть ключ на сервер сейчас (потребуется пароль)?"; then
-                # Лечим fingerprint только когда реально нужно (перед повторной попыткой)
-                _skynet_heal_host_key "$s_ip" "$s_port"
+                # Лечим fingerprint только когда реально нужно (перед повторной попыткой),
+                # и только после явного подтверждения нового/изменившегося fingerprint.
+                if ! _skynet_confirm_and_pin_host_key "$s_ip" "$s_port"; then
+                    wait_for_enter
+                    return
+                fi
                 # ВАЖНО: убираем IdentitiesOnly=yes — он блокирует аутентификацию паролем!
                 # ssh-copy-id должен войти паролем, чтобы скопировать ключ.
-                if ! ssh-copy-id -f -o StrictHostKeyChecking=no -i "${s_key}.pub" -p "$s_port" "${s_user}@${s_ip}"; then
+                if ! ssh-copy-id -f -o StrictHostKeyChecking=accept-new -i "${s_key}.pub" -p "$s_port" "${s_user}@${s_ip}"; then
                     err "Не удалось установить ключ. Проверь пароль или доступность SSH."
                     wait_for_enter
                     return
@@ -272,7 +292,7 @@ _show_server_management_menu() {
                 ok "Ключ успешно установлен!"
                 # Проверяем, что ключ теперь реально работает
                 printf "   🔑 Проверяю доступ по ключу... "
-                if ! ssh -q -F /dev/null -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=no -i "$s_key" -p "$s_port" "${s_user}@${s_ip}" exit; then
+                if ! ssh -q -F /dev/null -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new -i "$s_key" -p "$s_port" "${s_user}@${s_ip}" exit; then
                     err "Ключ установлен, но вход по нему всё равно не работает. Возможно, на сервере запрещён вход по паролю (PasswordAuthentication no)."
                     wait_for_enter
                     return
@@ -287,7 +307,7 @@ _show_server_management_menu() {
             # Сначала проверяем, нужен ли sudo-пароль вообще (NOPASSWD?)
             printf "   🔑 Проверяю права sudo... "
             if ssh -q -F /dev/null -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=5 \
-                   -o StrictHostKeyChecking=no -i "$s_key" -p "$s_port" "${s_user}@${s_ip}" \
+                   -o StrictHostKeyChecking=accept-new -i "$s_key" -p "$s_port" "${s_user}@${s_ip}" \
                    "sudo -n true" 2>/dev/null; then
                 printf "${C_GREEN}NOPASSWD ✓${C_RESET}\n"
                 info "Sudo без пароля обнаружен — пароль не нужен."
@@ -306,12 +326,17 @@ _show_server_management_menu() {
         run_remote() {
             local cmd_to_run="$1"
             if [[ "$s_user" == "root" ]]; then
-                ssh -F /dev/null -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o ConnectTimeout=5 -i "$s_key" -p "$s_port" "$s_user@$s_ip" "$cmd_to_run"
+                ssh -F /dev/null -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 -i "$s_key" -p "$s_port" "$s_user@$s_ip" "$cmd_to_run"
             elif [[ -n "$s_pass" ]]; then
-                ssh -F /dev/null -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o ConnectTimeout=5 -i "$s_key" -p "$s_port" "$s_user@$s_ip" "echo '$s_pass' | sudo -S -p '' bash -c '$cmd_to_run'"
+                # Пароль передаётся через stdin ssh-канала, а не вклеивается в текст
+                # команды: не попадает в argv/`ps` на удалённом сервере и не может
+                # вырваться из кавычек, если содержит спецсимволы.
+                local quoted_cmd; printf -v quoted_cmd '%q' "$cmd_to_run"
+                ssh -F /dev/null -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 -i "$s_key" -p "$s_port" "$s_user@$s_ip" "sudo -S -p '' bash -c ${quoted_cmd}" <<< "$s_pass"
             else
                 # NOPASSWD sudo
-                ssh -F /dev/null -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o ConnectTimeout=5 -i "$s_key" -p "$s_port" "$s_user@$s_ip" "sudo -n bash -c '$cmd_to_run'"
+                local quoted_cmd; printf -v quoted_cmd '%q' "$cmd_to_run"
+                ssh -F /dev/null -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 -i "$s_key" -p "$s_port" "$s_user@$s_ip" "sudo -n bash -c ${quoted_cmd}"
             fi
         }
 
@@ -395,7 +420,7 @@ REMOTE_SCRIPT
 
             # SCP скрипта на удалённый, выполняем, чистим
             if scp -q -P "$s_port" -F /dev/null -o IdentitiesOnly=yes -i "$s_key" \
-               -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
+               -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 \
                "$tmp_ctx" "${s_user}@${s_ip}:/tmp/reshala_ctx.sh" 2>/dev/null; then
                 
                 # Используем run_remote, чтобы корректно обработать NOPASSWD sudo
@@ -427,7 +452,7 @@ REMOTE_SCRIPT
         fi
 
         printf_info "Вхожу в удалённый терминал..."
-        local ssh_opts=(-t -F /dev/null -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -i "$s_key" -p "$s_port")
+        local ssh_opts=(-t -F /dev/null -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -i "$s_key" -p "$s_port")
         local remote_target="${s_user}@${s_ip}"
         # Исполняем команду через 'bash -l -c' и по абсолютному пути, чтобы гарантировать корректный $PATH
         local remote_exec_command="bash -l -c 'SKYNET_MODE=1 /opt/reshala/reshala.sh'"
@@ -435,9 +460,14 @@ REMOTE_SCRIPT
         if [[ "$s_user" == "root" ]]; then
             ssh "${ssh_opts[@]}" "$remote_target" "$remote_exec_command"
         elif [[ -n "$s_pass" ]]; then
-            # Важно: перенаправляем stdin обратно на терминал (< /dev/tty), 
-            # иначе интерактивное меню Решалы попытается читать из трубы (pipe) от команды echo '$s_pass'
-            local sudo_wrapper_command="echo '$s_pass' | sudo -S -p '' bash -c \"${remote_exec_command} < /dev/tty\""
+            # Важно: перенаправляем stdin обратно на терминал (< /dev/tty),
+            # иначе интерактивное меню Решалы попытается читать из трубы (pipe) от команды echo.
+            # Здесь нельзя передать пароль через stdin ssh-канала (как в run_remote),
+            # т.к. stdin нужен живым для интерактивной TUI-сессии ниже. Поэтому вместо
+            # этого пароль безопасно экранируется через %q — спецсимволы (кавычки и т.п.)
+            # не смогут вырваться из контекста команды и выполнить произвольный код.
+            local quoted_pass; printf -v quoted_pass '%q' "$s_pass"
+            local sudo_wrapper_command="echo ${quoted_pass} | sudo -S -p '' bash -c \"${remote_exec_command} < /dev/tty\""
             ssh "${ssh_opts[@]}" "$remote_target" "$sudo_wrapper_command"
         else
             # NOPASSWD sudo (проверено выше через sudo -n true)

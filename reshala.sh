@@ -273,8 +273,12 @@ show_main_menu() {
             if [[ "$choice" == "0" && "${SKYNET_MODE:-0}" -eq 1 ]]; then
                 printf_error "Ты уже в матрице."
             else
-                # Выполняем команду, собранную генератором
-                eval "$action"
+                # Выполняем команду, собранную генератором.
+                # $action - это всегда "run_module <путь> <функция>" или "<функция>",
+                # собранные из манифестов самого репо, поэтому прямой вызов без eval
+                # работает идентично, но не тянет за собой риск интерпретации
+                # спецсимволов, если формат action когда-нибудь изменится.
+                $action
             fi
         else
             # Если действие не найдено в манифестах, проверяем специальные случаи
@@ -412,13 +416,15 @@ main() {
         exit 0
     fi
 
+    # Headless-запуск из cron: проверка "Блокировка ТСПУ" по всему флоту
+    # с отчётом в Telegram, без выхода в интерактивное меню.
+    if [[ "${1:-}" == "censorcheck-report" ]]; then
+        run_module skynet/censorcheck_report _skynet_censorcheck_run_and_report --cron
+        exit $?
+    fi
+
     log "Запуск фреймворка Решала ${VERSION}"
     run_module core/self_update check_for_updates
-
-    # Автоматическое восстановление конфига и сертификатов Bedolaga при запуске / после обновлений
-    if [[ -f "${SCRIPT_DIR}/modules/vpn_gateway/menu.sh" ]]; then
-        run_module vpn_gateway/menu _vgw_auto_restore_on_boot 2>/dev/null || true
-    fi
 
     show_main_menu
 }

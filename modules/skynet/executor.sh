@@ -12,51 +12,79 @@
 _skynet_run_plugin_on_server() {
     local plugin="$1" name="$2" user="$3" ip="$4" port="$5" key_path="$6" sudo_pass="${7:-}"
     printf "\n"; warn "--- Сервер: $name ---"
-    # Лечим ключ хоста на случай, если сервер был переустановлен
-    _skynet_heal_host_key "$ip" "$port"
-    
-    local ssh_opts=(-P "$port" -F /dev/null -o IdentitiesOnly=yes -i "$key_path" -o StrictHostKeyChecking=no -o ConnectTimeout=10)
-    
-    # Копируем плагин на удалённую машину
-    if ! scp -q "${ssh_opts[@]}" "$plugin" "${user}@${ip}:/tmp/reshala_plugin.sh"; then
-        err "Не удалось скопировать плагин на $name (timeout/access)."
-        return 1
+
+    local ssh_opts=(-P "$port" -F /dev/null -o IdentitiesOnly=yes -i "$key_path" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10)
+
+    # Копируем плагин на удалённую машину. Ключ хоста заранее НЕ лечим:
+    # StrictHostKeyChecking=accept-new всё равно отклонит подключение, если
+    # ИЗМЕНИВШИЙСЯ ключ уже есть в known_hosts (защита от MITM), а
+    # безусловное "лечение" перед каждым запуском стирало бы эту защиту
+    # на каждой команде. Если первая попытка упала - явно спрашиваем
+    # подтверждение fingerprint (см. keys.sh), а не лечим молча.
+    if ! scp -q "${ssh_opts[@]}" "$plugin" "${user}@${ip}:/tmp/reshala_plugin.sh" < /dev/null; then
+        if ! _skynet_confirm_and_pin_host_key "$ip" "$port"; then
+            err "Пропускаю сервер $name."
+            return 1
+        fi
+        if ! scp -q "${ssh_opts[@]}" "$plugin" "${user}@${ip}:/tmp/reshala_plugin.sh" < /dev/null; then
+            err "Не удалось скопировать плагин на $name (timeout/access)."
+            return 1
+        fi
     fi
 
     local run_cmd="bash /tmp/reshala_plugin.sh; rm -f /tmp/reshala_plugin.sh"
-    
-    # Если пользователь не root и есть пароль, используем sudo
-    if [[ "$user" != "root" && -n "$sudo_pass" ]]; then
-        run_cmd="echo '$sudo_pass' | sudo -S -p '' bash -c '$run_cmd'"
-    fi
 
-    ssh -t "${ssh_opts[@]/#-P/-p}" "${user}@${ip}" "$run_cmd"
+    # Если пользователь не root и есть пароль, используем sudo.
+    # Пароль передаётся через stdin ssh-канала, а не вклеивается в текст
+    # команды: так он не попадает в командную строку (не виден в `ps` на
+    # удалённом сервере) и спецсимволы в пароле не могут разорвать кавычки
+    # и выполнить произвольный код.
+    # ВАЖНО: явный stdin (</dev/null или heredoc) обязателен на КАЖДОЙ ветке.
+    # Эта функция вызывается внутри `while read ... done < "$FLEET_DATABASE_FILE"`
+    # (см. _run_fleet_command) - без redirect ssh наследует fd 0 цикла и
+    # "съедает" из него оставшиеся строки базы флота, из-за чего обработка
+    # обрывается после первого же сервера.
+    if [[ "$user" != "root" && -n "$sudo_pass" ]]; then
+        local quoted_run_cmd; printf -v quoted_run_cmd '%q' "$run_cmd"
+        ssh -t "${ssh_opts[@]/#-P/-p}" "${user}@${ip}" "sudo -S -p '' bash -c ${quoted_run_cmd}" <<< "$sudo_pass"
+    else
+        ssh -t "${ssh_opts[@]/#-P/-p}" "${user}@${ip}" "$run_cmd" < /dev/null
+    fi
 }
 
 # Запуск плагина Skynet на ОДНОМ сервере с дополнительными переменными окружения
 _skynet_run_plugin_on_server_with_env() {
     local plugin="$1" env_vars="$2" name="$3" user="$4" ip="$5" port="$6" key_path="$7" sudo_pass="${8:-}"
     printf "\n"; warn "--- Сервер: $name ---"
-    # Лечим ключ хоста на случай, если сервер был переустановлен
-    _skynet_heal_host_key "$ip" "$port"
 
-    local ssh_opts=(-P "$port" -F /dev/null -o IdentitiesOnly=yes -i "$key_path" -o StrictHostKeyChecking=no -o ConnectTimeout=10)
+    local ssh_opts=(-P "$port" -F /dev/null -o IdentitiesOnly=yes -i "$key_path" -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10)
 
-    # Копируем плагин
-    if ! scp -q "${ssh_opts[@]}" "$plugin" "${user}@${ip}:/tmp/reshala_plugin.sh"; then
-        err "Не удалось скопировать плагин на $name (timeout/access)."
-        return 1
+    # Копируем плагин. См. комментарий в _skynet_run_plugin_on_server: при
+    # сбое явно спрашиваем подтверждение fingerprint, а не лечим молча.
+    if ! scp -q "${ssh_opts[@]}" "$plugin" "${user}@${ip}:/tmp/reshala_plugin.sh" < /dev/null; then
+        if ! _skynet_confirm_and_pin_host_key "$ip" "$port"; then
+            err "Пропускаю сервер $name."
+            return 1
+        fi
+        if ! scp -q "${ssh_opts[@]}" "$plugin" "${user}@${ip}:/tmp/reshala_plugin.sh" < /dev/null; then
+            err "Не удалось скопировать плагин на $name (timeout/access)."
+            return 1
+        fi
     fi
 
     # env_vars – это строка наподобие "VAR1=val1 VAR2=val2"
     local run_cmd="${env_vars} bash /tmp/reshala_plugin.sh; rm -f /tmp/reshala_plugin.sh"
 
-    # Если пользователь не root и есть пароль, используем sudo
+    # См. комментарии в _skynet_run_plugin_on_server: пароль идёт через stdin
+    # ssh-канала, а явный stdin (</dev/null или heredoc) обязателен на КАЖДОЙ
+    # ветке, иначе ssh съедает fd 0 цикла по флоту и обрывает обработку
+    # после первого сервера.
     if [[ "$user" != "root" && -n "$sudo_pass" ]]; then
-        run_cmd="echo '$sudo_pass' | sudo -S -p '' bash -c '$run_cmd'"
+        local quoted_run_cmd; printf -v quoted_run_cmd '%q' "$run_cmd"
+        ssh -t "${ssh_opts[@]/#-P/-p}" "${user}@${ip}" "sudo -S -p '' bash -c ${quoted_run_cmd}" <<< "$sudo_pass"
+    else
+        ssh -t "${ssh_opts[@]/#-P/-p}" "${user}@${ip}" "$run_cmd" < /dev/null
     fi
-
-    ssh -t "${ssh_opts[@]/#-P/-p}" "${user}@${ip}" "$run_cmd"
 }
 
 # Запуск плагина Skynet для захвата вывода (без TTY и без лишних сообщений)
@@ -70,15 +98,18 @@ _skynet_run_plugin_for_capture() {
     local key_path="$7"
     local temp_plugin_path="/tmp/reshala_plugin_$$_${RANDOM}"
 
-    # Копируем плагин
-    if ! scp -q -P "$port" -F /dev/null -o IdentitiesOnly=yes -i "$key_path" -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes "$plugin" "${user}@${ip}:${temp_plugin_path}" 2>/dev/null; then
+    # Копируем плагин. Явный stdin (</dev/null) - см. комментарий в
+    # _skynet_run_plugin_on_server: эту функцию тоже вызывают из циклов
+    # `while read ... done < "$FLEET_DATABASE_FILE"` (например, из
+    # ежедневного отчёта CensorCheck), и ssh/scp не должны отжирать fd 0 цикла.
+    if ! scp -q -P "$port" -F /dev/null -o IdentitiesOnly=yes -i "$key_path" -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new -o BatchMode=yes "$plugin" "${user}@${ip}:${temp_plugin_path}" < /dev/null 2>/dev/null; then
         # Не выводим ошибку, просто возвращаем пустоту, т.к. это может быть простая недоступность хоста
         return 1
     fi
     
     # Выполняем и захватываем вывод. Без -t для чистого вывода.
     local output
-    output=$(ssh -p "$port" -F /dev/null -o IdentitiesOnly=yes -i "$key_path" -o ConnectTimeout=5 -o StrictHostKeyChecking=no -o BatchMode=yes "${user}@${ip}" "${env_vars} bash ${temp_plugin_path}; rm -f ${temp_plugin_path}" 2>/dev/null)
+    output=$(ssh -p "$port" -F /dev/null -o IdentitiesOnly=yes -i "$key_path" -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new -o BatchMode=yes "${user}@${ip}" "${env_vars} bash ${temp_plugin_path}; rm -f ${temp_plugin_path}" < /dev/null 2>/dev/null)
     
     echo "$output"
 }

@@ -43,7 +43,7 @@ show_updater_menu() {
         action=$(get_menu_action "updater" "$choice")
         
         if [[ -n "$action" ]]; then
-            eval "$action"
+            $action
             wait_for_enter
         else
             printf_error "Нет такого пункта."

@@ -359,7 +359,7 @@ show_maintenance_menu() {
         local action; action=$(get_menu_action "local_care" "$choice")
         if [[ -n "$action" ]]; then
             # Действия из этого же файла, можно вызывать напрямую
-            eval "$action"
+            $action
         else
             warn "Неверный выбор"
         fi

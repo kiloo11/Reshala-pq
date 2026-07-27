@@ -152,7 +152,7 @@ err()  { printf_error "$@"; }
 init_logger() {
     if ! [ -f "$LOGFILE" ]; then
         touch "$LOGFILE" &>/dev/null || true
-        chmod 666 "$LOGFILE" &>/dev/null || true
+        chmod 600 "$LOGFILE" &>/dev/null || true
     fi
 }
 
@@ -540,7 +540,7 @@ view_logs_realtime() {
     local log_name="$2"
     if [ ! -f "$log_path" ]; then
         run_cmd touch "$log_path"
-        run_cmd chmod 666 "$log_path"
+        run_cmd chmod 600 "$log_path"
     fi
     echo "[*] Смотрю журнал '$log_name'... (CTRL+C, чтобы свалить)"
     enable_graceful_ctrlc

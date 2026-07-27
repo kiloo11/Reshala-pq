@@ -44,23 +44,121 @@ _generate_unique_key() {
 
 # Лечит ошибку "Host key verification failed", если сервер был переустановлен
 _skynet_heal_host_key() {
-    local ip="$1" 
+    local ip="$1"
     local port="$2"
+    # ВАЖНО: явно указываем -f. Без него ssh-keygen резолвит домашнюю
+    # директорию через getpwuid(), а не через $HOME, и может обратиться
+    # к другому known_hosts, чем тот, с которым работает остальной код.
+    local khf="${HOME}/.ssh/known_hosts"
     # Подавляем вывод, т.к. ошибка, если ключа нет, - это нормально
-    ssh-keygen -R "$ip" >/dev/null 2>&1
-    ssh-keygen -R "[$ip]:$port" >/dev/null 2>&1
+    ssh-keygen -R "$ip" -f "$khf" >/dev/null 2>&1
+    ssh-keygen -R "[$ip]:$port" -f "$khf" >/dev/null 2>&1
 }
 
-# Закидывает ключ на удалённый сервер, с лечением доступа
+# Показывает fingerprint удалённого хоста и явно спрашивает подтверждение
+# перед тем, как запомнить его (TOFU - trust on first use). Если ключ уже
+# известен и совпадает - молча возвращает успех без вопросов. Если ключ
+# ИЗМЕНИЛСЯ - показывает явное предупреждение (возможен MITM ИЛИ
+# переустановка сервера) и требует осознанного подтверждения.
+# Возвращает 0, если можно продолжать подключение, 1 - если пользователь
+# отказался (или отменил из-за недоступности хоста).
+_skynet_confirm_and_pin_host_key() {
+    local ip="$1" port="$2"
+    local khf="${HOME}/.ssh/known_hosts"
+    mkdir -p "${HOME}/.ssh"
+    touch "$khf"
+
+    local scanned
+    scanned=$(ssh-keyscan -p "$port" -T 5 "$ip" 2>/dev/null | grep -v '^#')
+    if [[ -z "$scanned" ]]; then
+        printf_warning "Не удалось получить ключ хоста ${ip}:${port} (сервер недоступен или порт закрыт)." >&2
+        if ask_yes_no "Продолжить БЕЗ проверки fingerprint? (небезопасно, риск MITM)" "n"; then
+            return 0
+        fi
+        return 1
+    fi
+
+    # Сравниваем с тем, что уже есть в known_hosts (по алгоритму+блобу ключа,
+    # а не просто по факту наличия записи), чтобы отличить "уже знаком и
+    # ключ тот же" от "ключ реально сменился".
+    local known_lines=""
+    known_lines+=$'\n'"$(ssh-keygen -F "[$ip]:$port" -f "$khf" 2>/dev/null | grep -v '^#')"
+    if [[ "$port" == "22" ]]; then
+        known_lines+=$'\n'"$(ssh-keygen -F "$ip" -f "$khf" 2>/dev/null | grep -v '^#')"
+    fi
+
+    local status="NEW"
+    if [[ -n "${known_lines//$'\n'/}" ]]; then
+        status="MATCH"
+        local mismatch=0
+        while IFS= read -r new_line; do
+            [[ -z "$new_line" ]] && continue
+            local new_algo new_blob
+            new_algo=$(awk '{print $2}' <<< "$new_line")
+            new_blob=$(awk '{print $3}' <<< "$new_line")
+            while IFS= read -r old_line; do
+                [[ -z "$old_line" ]] && continue
+                local old_algo old_blob
+                old_algo=$(awk '{print $2}' <<< "$old_line")
+                old_blob=$(awk '{print $3}' <<< "$old_line")
+                if [[ "$old_algo" == "$new_algo" && "$old_blob" != "$new_blob" ]]; then
+                    mismatch=1
+                fi
+            done <<< "$known_lines"
+        done <<< "$scanned"
+        [[ "$mismatch" -eq 1 ]] && status="MISMATCH"
+    fi
+
+    if [[ "$status" == "MATCH" ]]; then
+        return 0
+    fi
+
+    echo "" >&2
+    if [[ "$status" == "MISMATCH" ]]; then
+        printf_error "☢️  ВНИМАНИЕ: FINGERPRINT ХОСТА ${ip}:${port} ИЗМЕНИЛСЯ!" >&2
+        printf_warning "Это нормально, если сервер недавно переустановили." >&2
+        printf_warning "Но точно так же выглядит атака 'человек посередине' (MITM)." >&2
+    else
+        printf_info "🔑 Первое подключение к ${ip}:${port}. Fingerprint ключа хоста:" >&2
+    fi
+    echo "" >&2
+
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        local fp; fp=$(ssh-keygen -lf /dev/stdin <<< "$line" 2>/dev/null)
+        [[ -n "$fp" ]] && printf "   %s\n" "$fp" >&2
+    done <<< "$scanned"
+
+    echo "" >&2
+    printf_description "Сверь его с тем, что покажет сама машина:" >&2
+    printf_description "  ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub" >&2
+    echo "" >&2
+
+    local prompt="Доверяешь этому ключу и хочешь его запомнить? (y/n): "
+    [[ "$status" == "MISMATCH" ]] && prompt="Я ПОНИМАЮ РИСК и всё равно хочу принять НОВЫЙ ключ? (y/n): "
+
+    if ask_yes_no "$prompt" "n"; then
+        if [[ "$status" == "MISMATCH" ]]; then
+            _skynet_heal_host_key "$ip" "$port"
+        fi
+        printf '%s\n' "$scanned" >> "$khf"
+        printf_ok "Ключ хоста ${ip}:${port} сохранён." >&2
+        return 0
+    fi
+
+    printf_warning "Отменено пользователем." >&2
+    return 1
+}
+
+# Закидывает ключ на удалённый сервер.
+# ВАЖНО: ключ хоста здесь заранее НЕ лечится - к этому моменту он уже
+# должен быть проверен и явно подтверждён через _skynet_confirm_and_pin_host_key.
 _deploy_key_to_host() {
     local ip="$1" port="$2" user="$3" key_path="$4"
 
-    # Лечим ошибку "Host key verification failed", если сервер был переустановлен
-    _skynet_heal_host_key "$ip" "$port"
-
     printf "   👉 %s@%s:%s... " "$user" "$ip" "$port"
     # Сначала пробуем тихо войти по ключу, вдруг доступ уже есть
-    if ssh -q -F /dev/null -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=3 -o StrictHostKeyChecking=no -i "$key_path" -p "$port" "${user}@${ip}" exit; then
+    if ssh -q -F /dev/null -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=3 -o StrictHostKeyChecking=accept-new -i "$key_path" -p "$port" "${user}@${ip}" exit; then
         ok "ДОСТУП ЕСТЬ!"
         return 0
     fi
@@ -68,7 +166,7 @@ _deploy_key_to_host() {
     printf "\n"; warn "🔓 Вводи пароль (один раз), чтобы закинуть ключ..."
     # ВАЖНО: без IdentitiesOnly=yes — он блокирует аутентификацию паролем,
     # а ssh-copy-id должен войти паролем, чтобы скопировать ключ
-    if ssh-copy-id -f -o StrictHostKeyChecking=no -i "${key_path}.pub" -p "$port" "${user}@${ip}"; then
+    if ssh-copy-id -f -o StrictHostKeyChecking=accept-new -i "${key_path}.pub" -p "$port" "${user}@${ip}"; then
         ok "Ключ установлен!"
         return 0
     else
