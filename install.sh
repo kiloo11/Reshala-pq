@@ -10,8 +10,8 @@
 set -e
 
 # --- Настройки (можно вынести, но для простоты оставим здесь) ---
-REPO_OWNER="DonMatteoVPN"
-REPO_NAME="Reshala-Remnawave-Bedolaga"
+REPO_OWNER="kiloo11"
+REPO_NAME="Reshala-pq"
 REPO_BRANCH="main" # <-- ВАЖНО: Укажи правильную ветку!
 
 # --- Цвета ---
