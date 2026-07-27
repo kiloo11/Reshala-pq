@@ -86,7 +86,22 @@ _skynet_censorcheck_configure_telegram() {
     printf_description "Хранится в ${C_CYAN}${RESHALA_ENV_FILE}${C_RESET} (права 600), не в общем конфиге."
     echo ""
 
-    local token; token=$(ask_non_empty "TG_BOT_TOKEN" "${TG_BOT_TOKEN:-}") || return
+    # Токен вводится скрыто (как sudo-пароли в этом проекте) и никогда не
+    # показывается на экране как значение по умолчанию — даже если он уже
+    # сохранён. Пустой ввод при повторной настройке оставляет прежний токен.
+    local token
+    if [[ -n "${TG_BOT_TOKEN:-}" ]]; then
+        token=$(ask_password "TG_BOT_TOKEN (уже сохранён, Enter — оставить как есть): ") || return
+        [[ -z "$token" ]] && token="$TG_BOT_TOKEN"
+    else
+        token=$(ask_password "TG_BOT_TOKEN: ") || return
+        if [[ -z "$token" ]]; then
+            printf_error "Токен не может быть пустым."
+            wait_for_enter
+            return
+        fi
+    fi
+
     local chat_id; chat_id=$(ask_non_empty "TG_CHAT_ID" "${TG_CHAT_ID:-}") || return
 
     # Храним в /etc/reshala/.env (см. common.sh), а не в config/reshala.conf:
