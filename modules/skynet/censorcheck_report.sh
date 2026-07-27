@@ -132,27 +132,29 @@ _skynet_censorcheck_run_and_report() {
         return 1
     fi
 
+    [[ "$verbose" -eq 1 ]] && printf_info "Проверяю все серверы флота одновременно (параллельно)..."
+
+    local tmp_dir; tmp_dir=$(_skynet_run_plugin_on_fleet_parallel_capture "$_CENSORCHECK_PLUGIN")
+    local count; count=$(cat "${tmp_dir}/.count" 2>/dev/null || echo 0)
+
     local report="Блокировка ТСПУ — отчёт по флоту"$'\n'"$(date '+%Y-%m-%d %H:%M')"$'\n'
-    local total=0 failed=0 name user ip port key_path sudo_pass
+    local total=0 failed=0 idx name status out short_out
 
-    while IFS='|' read -r name user ip port key_path sudo_pass; do
-        [[ -z "$name" ]] && continue
+    for ((idx = 1; idx <= count; idx++)); do
+        name=$(cat "${tmp_dir}/${idx}.name" 2>/dev/null)
+        status=$(cat "${tmp_dir}/${idx}.status" 2>/dev/null)
         total=$((total + 1))
-        [[ "$verbose" -eq 1 ]] && printf_info "Проверяю ${name} (${ip})..."
 
-        local out
-        out=$(_skynet_run_plugin_for_capture "$_CENSORCHECK_PLUGIN" "" "$name" "$user" "$ip" "$port" "$key_path")
-        out="${out//$'\r'/}"
-
-        if [[ -z "$out" ]]; then
-            failed=$((failed + 1))
-            report+=$'\n'"❌ ${name} (${ip}) — сервер недоступен или проверка не выполнена"
-        else
+        if [[ "$status" == "OK" ]]; then
             # Обрезаем вывод, чтобы один "болтливый" сервер не съел весь отчёт
-            local short_out; short_out=$(printf '%s' "$out" | tail -c 600)
-            report+=$'\n'"✅ ${name} (${ip}):"$'\n'"${short_out}"$'\n'
+            short_out=$(tail -c 600 "${tmp_dir}/${idx}.out" 2>/dev/null | tr -d '\r')
+            report+=$'\n'"✅ ${name}:"$'\n'"${short_out}"$'\n'
+        else
+            failed=$((failed + 1))
+            report+=$'\n'"❌ ${name} — сервер недоступен или проверка не выполнена"
         fi
-    done < "$FLEET_DATABASE_FILE"
+    done
+    rm -rf "$tmp_dir"
 
     report+=$'\n'"Итого: ${total} серверов, ${failed} недоступно."
 

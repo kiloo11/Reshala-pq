@@ -96,6 +96,7 @@ _skynet_run_plugin_for_capture() {
     local ip="$5"
     local port="$6"
     local key_path="$7"
+    local sudo_pass="${8:-}"
     local temp_plugin_path="/tmp/reshala_plugin_$$_${RANDOM}"
 
     # Копируем плагин. Явный stdin (</dev/null) - см. комментарий в
@@ -106,12 +107,110 @@ _skynet_run_plugin_for_capture() {
         # Не выводим ошибку, просто возвращаем пустоту, т.к. это может быть простая недоступность хоста
         return 1
     fi
-    
+
+    local run_cmd="${env_vars} bash ${temp_plugin_path}; rm -f ${temp_plugin_path}"
+
     # Выполняем и захватываем вывод. Без -t для чистого вывода.
+    # Пароль (если нужен sudo) - через stdin, см. _skynet_run_plugin_on_server.
     local output
-    output=$(ssh -p "$port" -F /dev/null -o IdentitiesOnly=yes -i "$key_path" -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new -o BatchMode=yes "${user}@${ip}" "${env_vars} bash ${temp_plugin_path}; rm -f ${temp_plugin_path}" < /dev/null 2>/dev/null)
-    
+    if [[ "$user" != "root" && -n "$sudo_pass" ]]; then
+        local quoted_run_cmd; printf -v quoted_run_cmd '%q' "$run_cmd"
+        output=$(ssh -p "$port" -F /dev/null -o IdentitiesOnly=yes -i "$key_path" -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new -o BatchMode=yes "${user}@${ip}" "sudo -S -p '' bash -c ${quoted_run_cmd}" <<< "$sudo_pass" 2>/dev/null)
+    else
+        output=$(ssh -p "$port" -F /dev/null -o IdentitiesOnly=yes -i "$key_path" -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new -o BatchMode=yes "${user}@${ip}" "$run_cmd" < /dev/null 2>/dev/null)
+    fi
+
     echo "$output"
+}
+
+# Запускает плагин на ВСЕХ серверах флота ПАРАЛЛЕЛЬНО (в фоне) и складывает
+# результаты в файлы внутри временной директории, путь к которой печатает
+# в stdout (единственная строка вывода). На каждый обработанный сервер N:
+#   <tmp_dir>/N.name   - "Имя (IP)"
+#   <tmp_dir>/N.status - "OK" | "FAIL"
+#   <tmp_dir>/N.out    - захваченный вывод плагина (только если OK)
+# <tmp_dir>/.count     - общее количество серверов N
+# Вызывающая сторона сама решает, как показать результаты, и должна
+# удалить tmp_dir после использования.
+_skynet_run_plugin_on_fleet_parallel_capture() {
+    local plugin="$1"
+    local env_vars="${2:-}"
+    local tmp_dir; tmp_dir=$(mktemp -d)
+
+    # Читаем базу флота СРАЗУ в массив, а не в while-read с фоновыми ssh
+    # внутри цикла - иначе параллельные джобы будут бороться за общий fd 0
+    # цикла чтения (см. комментарии в _skynet_run_plugin_on_server).
+    local -a lines=()
+    local line
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && lines+=("$line")
+    done < "$FLEET_DATABASE_FILE"
+
+    local -a pids=()
+    local i=0 name user ip port key_path sudo_pass
+    for line in "${lines[@]}"; do
+        IFS='|' read -r name user ip port key_path sudo_pass <<< "$line"
+        [[ -z "$name" ]] && continue
+        i=$((i + 1))
+        echo "${name} (${ip})" > "${tmp_dir}/${i}.name"
+        (
+            local out
+            out=$(_skynet_run_plugin_for_capture "$plugin" "$env_vars" "$name" "$user" "$ip" "$port" "$key_path" "$sudo_pass")
+            if [[ -z "$out" ]]; then
+                echo "FAIL" > "${tmp_dir}/${i}.status"
+            else
+                printf '%s' "$out" > "${tmp_dir}/${i}.out"
+                echo "OK" > "${tmp_dir}/${i}.status"
+            fi
+        ) &
+        pids+=("$!")
+    done
+
+    if [[ ${#pids[@]} -gt 0 ]]; then
+        wait "${pids[@]}" 2>/dev/null
+    fi
+
+    echo "$i" > "${tmp_dir}/.count"
+    echo "$tmp_dir"
+}
+
+# Запускает плагин на всём флоте параллельно (см. выше) и печатает
+# результаты одним списком после завершения всех серверов.
+_skynet_run_plugin_on_fleet_parallel() {
+    local plugin="$1"
+
+    if [[ ! -s "$FLEET_DATABASE_FILE" ]]; then
+        printf_warning "База флота пуста."
+        return 1
+    fi
+
+    local total; total=$(grep -c . "$FLEET_DATABASE_FILE" 2>/dev/null || echo 0)
+    printf_info "Запускаю '${plugin##*/}' параллельно на ${total} серверах. Жду завершения всех..."
+
+    local tmp_dir; tmp_dir=$(_skynet_run_plugin_on_fleet_parallel_capture "$plugin")
+    local count; count=$(cat "${tmp_dir}/.count" 2>/dev/null || echo 0)
+
+    echo ""
+    print_separator "=" 60
+    printf_info "РЕЗУЛЬТАТЫ: ${plugin##*/}"
+    print_separator "=" 60
+
+    local idx status name
+    for ((idx = 1; idx <= count; idx++)); do
+        name=$(cat "${tmp_dir}/${idx}.name" 2>/dev/null)
+        status=$(cat "${tmp_dir}/${idx}.status" 2>/dev/null)
+        echo ""
+        if [[ "$status" == "OK" ]]; then
+            printf "${C_GREEN}✅ %s${C_RESET}\n" "$name"
+            sed 's/^/   /' "${tmp_dir}/${idx}.out" 2>/dev/null
+        else
+            printf "${C_RED}❌ %s — сервер недоступен${C_RESET}\n" "$name"
+        fi
+    done
+    echo ""
+    print_separator "=" 60
+
+    rm -rf "$tmp_dir"
 }
 
 _run_fleet_command() {
@@ -232,12 +331,10 @@ _run_fleet_command() {
                 fi
             fi
         else
-            printf_warning "Выполняю '${selected_plugin##*/}' на ВСЁМ флоте. Это может занять время."
+            printf_warning "Выполняю '${selected_plugin##*/}' на ВСЁМ флоте ОДНОВРЕМЕННО (параллельно)."
             if ask_yes_no "Начать? (y/n): " "n"; then
-                while IFS='|' read -r name user ip port key_path sudo_pass; do
-                    _skynet_run_plugin_on_server "$selected_plugin" "$name" "$user" "$ip" "$port" "$key_path" "$sudo_pass"
-                done < "$FLEET_DATABASE_FILE"
-                printf_ok "Команда выполнена на всём флоте."; wait_for_enter
+                _skynet_run_plugin_on_fleet_parallel "$selected_plugin"
+                wait_for_enter
             fi
         fi
     done
