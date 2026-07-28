@@ -435,6 +435,10 @@ This section is a running log for AI agents (e.g., WARP assistants) so they imme
   - **03_online_users.sh** – «Сетевой движ (TCP)»:
     - Counts active TCP connections in ESTABLISHED state using `ss` or `netstat`.
     - Prints: `TCP-сессии: <N> активных`.
+  - **04_fleet_online.sh** – «Серверы флота онлайн»:
+    - Reads the Skynet fleet database (`FLEET_DATABASE_FILE`, default `~/.reshala_fleet`) and probes every server in parallel.
+    - Prints one coloured line: `Флот онлайн: <N> из <M>` (green = all up, yellow = some, red = none). Prints nothing when the fleet database is missing or empty.
+    - Checks that the SSH **port** answers, not that the key logs in, because the widget re-runs on the widget cache TTL; set `CHECK_MODE="ssh"` at the top of the file to match the fleet menu exactly.
   - **04_root_disk.sh** – «Настроение сервера»:
     - Mixes uptime and relative CPU load per core to produce a human description ("новенький", "пинает балду", "пыхтит изо всех сил", etc.).
     - Prints a single line: `Настроение сервера: <text> (аптайм: ..., load: .../cores)`.
