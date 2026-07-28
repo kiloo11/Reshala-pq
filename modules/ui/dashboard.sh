@@ -444,6 +444,18 @@ show() {
     # (modules/skynet/capacity.sh). Показываем строку, только если замер уже
     # был: на одиночном сервере без флота это была бы пустая строка-шум.
     local fleet_capacity; fleet_capacity=$(get_config_var "FLEET_TOTAL_CAPACITY")
+
+    # Метку идущего фонового замера ставит modules/skynet/capacity.sh. Читаем
+    # её здесь тремя строками, а не через run_module: дашборд перерисовывается
+    # на каждое нажатие, и сорсить ради этого модуль замера с executor.sh дорого.
+    local fleet_running=0 fleet_pid=""
+    if [[ -r "${FLEET_CAPACITY_RUN_FILE:-/nonexistent}" ]]; then
+        fleet_pid=$(cat "${FLEET_CAPACITY_RUN_FILE}" 2>/dev/null)
+        if [[ "$fleet_pid" =~ ^[0-9]+$ ]] && kill -0 "$fleet_pid" 2>/dev/null; then
+            fleet_running=1
+        fi
+    fi
+
     if [[ -n "$fleet_capacity" ]]; then
         local fleet_servers; fleet_servers=$(get_config_var "FLEET_CAPACITY_SERVERS")
         local fleet_date; fleet_date=$(get_config_var "FLEET_CAPACITY_DATE")
@@ -453,7 +465,10 @@ show() {
         elif [[ -n "$fleet_date" ]]; then
             fleet_note=" (${fleet_date})"
         fi
+        [[ $fleet_running -eq 1 ]] && fleet_note+=" ⏳ идёт замер"
         print_key_value "Общая вместимость" "${C_GREEN}${fleet_capacity} польз.${C_RESET}${C_GRAY}${fleet_note}${C_RESET}" "$min_label_width"
+    elif [[ $fleet_running -eq 1 ]]; then
+        print_key_value "Общая вместимость" "${C_YELLOW}⏳ идёт замер флота...${C_RESET}" "$min_label_width"
     fi
 
     local shaper_status; shaper_status=$(_get_traffic_limiter_status_string)

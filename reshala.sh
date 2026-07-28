@@ -319,8 +319,19 @@ main() {
         exit $?
     fi
 
+    # Фоновый замер вместимости флота. Отдельный процесс без меню — его
+    # запускает сама Решала при старте (_skynet_capacity_auto_maybe_start).
+    if [[ "${1:-}" == "fleet-capacity" ]]; then
+        run_module skynet/capacity _skynet_capacity_auto_run
+        exit $?
+    fi
+
     log "Запуск фреймворка Решала ${VERSION}"
     run_module core/self_update check_for_updates
+
+    # Если Решалу обновили или сервер перезагрузили — перемеряем флот. Замер
+    # уходит в фон, меню открывается сразу, результат сам появится на дашборде.
+    run_module skynet/capacity _skynet_capacity_auto_maybe_start
 
     show_main_menu
 }
