@@ -213,6 +213,25 @@ _skynet_run_plugin_on_fleet_parallel() {
     rm -rf "$tmp_dir"
 }
 
+# Переводит имя цвета из заголовка плагина (# SKYNET_COLOR: yellow) в код
+# из common.sh. Список закрытый и разворачивается через indirect expansion,
+# а не eval: заголовок плагина — это просто текст из файла, и он не должен
+# уметь выполнить что-то своё.
+_skynet_plugin_color() {
+    local name="${1,,}"
+    case "$name" in
+        yellow)          printf '%s' "${C_YELLOW}" ;;
+        green)           printf '%s' "${C_GREEN}" ;;
+        cyan)            printf '%s' "${C_CYAN}" ;;
+        red)             printf '%s' "${C_RED}" ;;
+        blue)            printf '%s' "${C_BLUE}" ;;
+        magenta|purple)  printf '%s' "${C_MAGENTA}" ;;
+        gray|grey)       printf '%s' "${C_GRAY}" ;;
+        bold)            printf '%s' "${C_BOLD}" ;;
+        *)               printf '' ;; # пусто = цвет меню по умолчанию
+    esac
+}
+
 _run_fleet_command() {
     local PLUGINS_DIR="${SCRIPT_DIR}/plugins/skynet_commands"
     if [[ ! -d "$PLUGINS_DIR" || -z "$(find "$PLUGINS_DIR" -type f -name '*.sh')" ]]; then
@@ -227,9 +246,11 @@ _run_fleet_command() {
         # FIX: Aggressively unset arrays to prevent duplication bug.
         unset categories
         unset plugin_paths
+        unset plugin_colors
 
         local -A categories
         local -A plugin_paths
+        local -A plugin_colors
         local total_plugins=0
 
         # Находим все плагины и разбираем их по категориям
@@ -253,9 +274,16 @@ _run_fleet_command() {
                     title="$(basename "$p" | sed 's/^[0-9]*_//;s/.sh$//')"
                 fi
                 
+                # Цвет пункта храним отдельным массивом, а не третьим полем в
+                # строке категории: она разбирается через IFS и лишнее поле
+                # там уже не отличить от текста заголовка.
+                local color_name
+                color_name=$(grep -m1 '^# SKYNET_COLOR:' "$p" 2>/dev/null | sed 's/^# SKYNET_COLOR:[[:space:]]*//')
+
                 total_plugins=$((total_plugins + 1))
                 categories["$category"]+="${total_plugins}:::${title}\n"
                 plugin_paths["$total_plugins"]="$p"
+                plugin_colors["$total_plugins"]=$(_skynet_plugin_color "$color_name")
             fi
         done < <(find "$PLUGINS_DIR" -type f -name '*.sh' | sort)
 
@@ -278,7 +306,8 @@ _run_fleet_command() {
                     # FIX: Defensively remove '::' from title before printing, as its source is unclear.
                     local clean_title
                     clean_title=$(echo "$title" | sed 's/::\s*//g')
-                    printf_menu_option "$idx" "$clean_title"
+                    # Пустой цвет printf_menu_option трактует как "по умолчанию"
+                    printf_menu_option "$idx" "$clean_title" "${plugin_colors[$idx]:-}"
                 fi
             done <<< "$sorted_plugins"
         done
