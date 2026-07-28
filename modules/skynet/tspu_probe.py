@@ -19,6 +19,7 @@
 import sys
 import json
 import time
+import urllib.error
 import urllib.request
 
 RIPE_PROBE_ASNS = [
@@ -73,6 +74,25 @@ def main():
         with urllib.request.urlopen(req, timeout=15) as response:
             resp_data = json.loads(response.read().decode())
             msm_id = resp_data["measurements"][0]
+    except urllib.error.HTTPError as e:
+        # RIPE Atlas обычно возвращает JSON вида {"error": {"status": ..,
+        # "title": "..", "detail": ".."}} - вытаскиваем читаемую причину
+        # (неверный/просроченный ключ, нет нужного scope, не хватает
+        # кредитов на измерение и т.п.) вместо голого имени исключения.
+        try:
+            body = e.read().decode("utf-8", errors="replace")
+        except Exception:
+            body = ""
+        detail = body
+        try:
+            err_json = json.loads(body)
+            err_obj = err_json.get("error", {})
+            detail = err_obj.get("detail") or err_obj.get("title") or body
+        except Exception:
+            pass
+        detail = " ".join(detail.split())[:200]
+        print(f"ERROR HTTP{e.code}:{detail}")
+        return
     except Exception as e:
         print(f"ERROR API_FAIL:{type(e).__name__}")
         return
