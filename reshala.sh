@@ -26,7 +26,7 @@ export SCRIPT_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 # что приводит к "chdir: error: getcwd: cannot access parent directories"
 cd "$SCRIPT_DIR" 2>/dev/null || cd / || true
 
-readonly VERSION="v3.138"
+readonly VERSION="v3.139"
 
 # ============================================================ #
 #              ПОДГОТОВКА И ЗАГРУЗКА КОМПОНЕНТОВ               #
