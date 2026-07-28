@@ -148,6 +148,21 @@ ok()   { printf_ok "$@"; }
 warn() { printf_warning "$@"; }
 err()  { printf_error "$@"; }
 
+# --- Время ---
+# Печатает текущее московское время в переданном формате date.
+# Просто TZ="Europe/Moscow" недостаточно: на минимальных образах без tzdata
+# неизвестная зона молча откатывается на UTC — и вместо московского времени
+# пользователь снова увидел бы серверное. Поэтому, если файла зоны нет,
+# прибавляем фиксированные +3 часа сами (МСК круглый год UTC+3).
+msk_date() {
+    local fmt="$1"
+    if [[ -e "/usr/share/zoneinfo/${RESHALA_TZ}" ]]; then
+        TZ="$RESHALA_TZ" date "$fmt"
+    else
+        date -u -d "@$(( $(date +%s) + RESHALA_TZ_OFFSET_MIN * 60 ))" "$fmt"
+    fi
+}
+
 # --- Логирование ---
 init_logger() {
     if ! [ -f "$LOGFILE" ]; then

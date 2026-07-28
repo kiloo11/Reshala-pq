@@ -109,7 +109,10 @@ _skynet_capacity_run_fleet() {
 
     # Дата в формате без '|' и '/': set_config_var пишет значение через sed
     # с разделителем '|', а сам конфиг потом сорсится как shell-файл.
-    _CAPACITY_STAMP=$(date '+%d.%m %H:%M')
+    # Время московское (msk_date): метку видно на дашборде рядом с числом,
+    # и по часам сервера она разошлась бы с настенными часами пользователя —
+    # у VPS это почти всегда UTC.
+    _CAPACITY_STAMP=$(msk_date '+%d.%m %H:%M')
     set_config_var "FLEET_TOTAL_CAPACITY" "$sum"
     set_config_var "FLEET_CAPACITY_SERVERS" "${ok_count} из ${count}"
     set_config_var "FLEET_CAPACITY_DATE" "$_CAPACITY_STAMP"

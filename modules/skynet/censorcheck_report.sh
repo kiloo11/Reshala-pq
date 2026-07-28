@@ -20,11 +20,9 @@
 _CENSORCHECK_CRON_FILE="/etc/cron.d/reshala-censorcheck"
 _TSPU_PROBE_SCRIPT="${SCRIPT_DIR}/modules/skynet/tspu_probe.py"
 
-# Время запуска и отметка в отчёте — всегда московские, независимо от часового
-# пояса сервера (у VPS это почти всегда UTC, и отчёт приходил на 3 часа позже,
-# чем просил пользователь).
-_CENSORCHECK_TZ="Europe/Moscow"
-_CENSORCHECK_TZ_OFFSET_MIN=180   # МСК = UTC+3 круглый год, перехода на лето нет
+# Время запуска и отметка в отчёте — московские (RESHALA_TZ и
+# RESHALA_TZ_OFFSET_MIN из config/reshala.conf), а не по часовому поясу
+# сервера: у VPS это почти всегда UTC, и отчёт приходил на 3 часа позже.
 
 # Те же ASN российских операторов, что и в исходном censorcheck.sh -
 # только для перевода номера ASN в человекочитаемое имя в отчёте.
@@ -376,7 +374,7 @@ _skynet_censorcheck_run_and_report() {
     done
     rm -rf "$tmp_dir"
 
-    local report="🛡 <b>Блокировка ТСПУ — отчёт по флоту</b>"$'\n'"$(TZ="$_CENSORCHECK_TZ" date '+%Y-%m-%d %H:%M') МСК"$'\n\n'
+    local report="🛡 <b>Блокировка ТСПУ — отчёт по флоту</b>"$'\n'"$(msk_date '+%Y-%m-%d %H:%M') МСК"$'\n\n'
     report+="${ok_list}"
 
     if [[ -n "$fail_list" ]]; then
@@ -435,7 +433,7 @@ _skynet_censorcheck_msk_to_local() {
     local offset=$(( 10#${z:1:2} * 60 + 10#${z:3:2} ))
     [[ "${z:0:1}" == "-" ]] && offset=$(( -offset ))
 
-    local total=$(( 10#$hour * 60 + 10#$minute - _CENSORCHECK_TZ_OFFSET_MIN + offset ))
+    local total=$(( 10#$hour * 60 + 10#$minute - RESHALA_TZ_OFFSET_MIN + offset ))
     total=$(( (total % 1440 + 1440) % 1440 ))
     echo "$(( total / 60 )) $(( total % 60 ))"
 }
@@ -452,7 +450,7 @@ _skynet_censorcheck_install_cron() {
     # сам cron (CRON_TZ), либо, если он этого не умеет, переводим время сами.
     local tz_line cron_hour="$hour" cron_minute="$minute"
     if _skynet_censorcheck_cron_has_tz; then
-        tz_line="CRON_TZ=${_CENSORCHECK_TZ}"
+        tz_line="CRON_TZ=${RESHALA_TZ}"
     else
         read -r cron_hour cron_minute <<< "$(_skynet_censorcheck_msk_to_local "$hour" "$minute")"
         tz_line="# Этот cron не понимает CRON_TZ, поэтому ${msk_time} МСК записаны ниже"$'\n'"# как $(printf '%02d:%02d' "$cron_hour" "$cron_minute") по времени сервера."
