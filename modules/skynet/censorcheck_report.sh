@@ -3,26 +3,39 @@
 # ==   SKYNET: ЕЖЕДНЕВНЫЙ ОТЧЁТ "БЛОКИРОВКА ТСПУ" В TELEGRAM == #
 # ============================================================ #
 #
-# Модуль запускает плагин "Блокировка ТСПУ"
-# (plugins/skynet_commands/diagnostics/04_censorcheck.sh) на всех
-# серверах флота и присылает сводный отчёт в Telegram.
-# Работает и из TUI (настройка/ручной запуск), и headless из cron
-# (см. reshala.sh -> censorcheck-report).
+# Ежедневно проверяет доступность IP каждого сервера флота из сетей
+# российских операторов через реальные зонды RIPE Atlas (тот же метод
+# измерения, что в публичном censorcheck.tlab.pw, но со своим API-ключом -
+# см. _skynet_tspu_check_one() и tspu_probe.py). Проверка бьёт напрямую по
+# IP из базы флота, без захода на сам сервер по SSH. Присылает сводный
+# отчёт в Telegram. Работает и из TUI (настройка/ручной запуск), и
+# headless из cron (см. reshala.sh -> censorcheck-report).
 #
 # @menu.manifest
-# @item( skynet | t | 📡 Отчёт "Блокировка ТСПУ" в Telegram | _skynet_censorcheck_menu | 50 | 2 | Ежедневная проверка DPI-блокировок на всём флоте с отчётом в Telegram. )
+# @item( skynet | t | 📡 Отчёт "Блокировка ТСПУ" в Telegram | _skynet_censorcheck_menu | 50 | 2 | Ежедневная проверка блокировок ТСПУ по флоту через RIPE Atlas с отчётом в Telegram. )
 #
 
 [[ "${BASH_SOURCE[0]}" == "${0}" ]] && exit 1 # Защита от прямого запуска
 
-# Подключаем зависимости на случай headless-вызова из cron, где
-# modules/skynet/menu.sh не был подключён.
-source "${SCRIPT_DIR}/modules/skynet/keys.sh"
-source "${SCRIPT_DIR}/modules/skynet/db.sh"
-source "${SCRIPT_DIR}/modules/skynet/executor.sh"
-
-_CENSORCHECK_PLUGIN="${SCRIPT_DIR}/plugins/skynet_commands/diagnostics/04_censorcheck.sh"
 _CENSORCHECK_CRON_FILE="/etc/cron.d/reshala-censorcheck"
+_TSPU_PROBE_SCRIPT="${SCRIPT_DIR}/modules/skynet/tspu_probe.py"
+
+# Те же ASN российских операторов, что и в исходном censorcheck.sh -
+# только для перевода номера ASN в человекочитаемое имя в отчёте.
+declare -A _TSPU_ASN_NAMES=(
+    [12389]="Ростелеком"
+    [8402]="Билайн"
+    [25513]="МГТС"
+    [8359]="МТС"
+    [3216]="Билайн"
+    [20485]="ТТК"
+    [25490]="РТК-Юг"
+    [43727]="Мегафон"
+    [12714]="Мегафон"
+    [34757]="Sib Seti"
+    [29124]="Iskratelecom"
+    [12768]="Дом.ру"
+)
 
 # ============================================================ #
 #                        TELEGRAM                              #
@@ -132,6 +145,152 @@ _skynet_censorcheck_configure_telegram() {
     wait_for_enter
 }
 
+_skynet_censorcheck_configure_ripe() {
+    clear
+    menu_header "🛰 Настройка RIPE Atlas (радар ТСПУ)"
+    echo ""
+    printf_description "Отчёт проверяет доступность IP серверов из сетей российских"
+    printf_description "операторов через реальные зонды RIPE Atlas (тот же метод, что"
+    printf_description "и в censorcheck.tlab.pw, но со СВОИМ ключом - автор скрипта"
+    printf_description "прямо просит не использовать его ключ в сторонних проектах)."
+    echo ""
+    printf_description "Как получить свой ключ (бесплатно, пару минут):"
+    printf_description "1. Зарегистрируйся на ${C_CYAN}https://atlas.ripe.net${C_RESET}"
+    printf_description "2. Профиль -> ${C_CYAN}My API Keys${C_RESET} -> Create -> дай права"
+    printf_description "   на создание измерений (Measurement creation)."
+    printf_description "3. Скопируй ключ сюда."
+    echo ""
+    printf_description "Хранится в ${C_CYAN}${RESHALA_ENV_FILE}${C_RESET} (права 600), не в общем конфиге."
+    echo ""
+
+    local key
+    if [[ -n "${RIPE_API_KEY:-}" ]]; then
+        key=$(ask_password "RIPE_API_KEY (уже сохранён, Enter — оставить как есть): ") || return
+        [[ -z "$key" ]] && key="$RIPE_API_KEY"
+    else
+        key=$(ask_password "RIPE_API_KEY: ") || return
+        if [[ -z "$key" ]]; then
+            printf_error "Ключ не может быть пустым."
+            wait_for_enter
+            return
+        fi
+    fi
+
+    echo ""
+    printf_description "SNI, под который маскируется проверка (например, домен из твоего"
+    printf_description "Reality-конфига). По умолчанию как в исходном скрипте: max.ru"
+    local sni; sni=$(ask_non_empty "SNI для пробы" "${TSPU_REALITY_SNI:-max.ru}") || return
+
+    set_env_var "RIPE_API_KEY" "$key"
+    RIPE_API_KEY="$key"
+    set_config_var "TSPU_REALITY_SNI" "$sni"
+    TSPU_REALITY_SNI="$sni"
+
+    printf_ok "Сохранено."
+    wait_for_enter
+}
+
+# ============================================================ #
+#                РАДАР ТСПУ (RIPE ATLAS, БЕЗ SSH)               #
+# ============================================================ #
+#
+# В отличие от полного censorcheck.tlab.pw (который гоняется ПО SSH НА
+# каждом сервере флота и проверяет заодно ~30 внешних доменов), проверка
+# ТСПУ бьёт зондами RIPE Atlas напрямую в IP сервера - для этого не нужно
+# заходить на сам сервер, IP уже есть в базе флота. Поэтому эта часть
+# выполняется локально с контрольного хоста, параллельно по всем серверам.
+
+# Проверяет один IP: доступность порта 443 + опрос RIPE Atlas.
+# Печатает ОДНУ строку вида:
+#   AVAILABLE <детали>
+#   BLOCKED <детали>
+#   SKIP <причина>
+_skynet_tspu_check_one() {
+    local ip="$1" sni="$2" api_key="$3"
+
+    # Без реально слушающего 443 RIPE Atlas всё равно покажет "заблокировано"
+    # для всех зондов - но это не ТСПУ, а просто отсутствие VPN на сервере.
+    # Такие случаи не считаем ни OK, ни BLOCKED - помечаем на ручную проверку.
+    if ! timeout 4 bash -c "echo > /dev/tcp/${ip}/443" 2>/dev/null; then
+        echo "SKIP порт 443 не отвечает (нет VPN/Reality на сервере или сервер недоступен)"
+        return
+    fi
+
+    local py_out
+    py_out=$(python3 "$_TSPU_PROBE_SCRIPT" "$api_key" "$ip" "$sni" 2>/dev/null)
+
+    if [[ -z "$py_out" ]] || echo "$py_out" | grep -q "^ERROR"; then
+        local reason; reason=$(echo "$py_out" | grep "^ERROR" | head -1)
+        echo "SKIP RIPE Atlas не ответил (${reason:-нет ответа})"
+        return
+    fi
+
+    local ok_line; ok_line=$(echo "$py_out" | grep "^OK " | head -1)
+    if [[ -z "$ok_line" ]]; then
+        echo "SKIP не удалось разобрать ответ RIPE Atlas"
+        return
+    fi
+
+    local _tag total success blocked
+    read -r _tag total success blocked <<< "$ok_line"
+    local percent=0
+    [[ "${total:-0}" -gt 0 ]] && percent=$(( success * 100 / total ))
+
+    local blockers=""
+    local blocked_asn_line; blocked_asn_line=$(echo "$py_out" | grep "^BLOCKED_ASN" | head -1)
+    if [[ -n "$blocked_asn_line" ]]; then
+        local parts="${blocked_asn_line#BLOCKED_ASN }"
+        local part asn cnt name
+        for part in $parts; do
+            asn="${part%%:*}"; cnt="${part##*:}"
+            name="${_TSPU_ASN_NAMES[$asn]:-AS$asn}"
+            blockers+="${name}(${cnt}), "
+        done
+        blockers="${blockers%, }"
+    fi
+
+    if [[ "$percent" -eq 100 ]]; then
+        echo "AVAILABLE зондов: ${total}, все достучались"
+    else
+        echo "BLOCKED доступно ${percent}% (${success}/${total})${blockers:+, блокируют: ${blockers}}"
+    fi
+}
+
+# Запускает проверку ТСПУ на всех серверах флота ПАРАЛЛЕЛЬНО (без SSH,
+# напрямую по IP из базы флота). Результаты - в файлах внутри временной
+# директории, путь к которой печатает в stdout:
+#   <tmp_dir>/N.name   - "Имя (IP)"
+#   <tmp_dir>/N.result - "AVAILABLE ..." | "BLOCKED ..." | "SKIP ..."
+#   <tmp_dir>/.count   - количество серверов N
+_skynet_tspu_check_fleet_parallel() {
+    local sni="$1" api_key="$2"
+    local tmp_dir; tmp_dir=$(mktemp -d)
+
+    local -a lines=()
+    local line
+    while IFS= read -r line; do
+        [[ -n "$line" ]] && lines+=("$line")
+    done < "$FLEET_DATABASE_FILE"
+
+    local -a pids=()
+    local i=0 name user ip port key_path sudo_pass
+    for line in "${lines[@]}"; do
+        IFS='|' read -r name user ip port key_path sudo_pass <<< "$line"
+        [[ -z "$name" ]] && continue
+        i=$((i + 1))
+        echo "${name} (${ip})" > "${tmp_dir}/${i}.name"
+        ( _skynet_tspu_check_one "$ip" "$sni" "$api_key" > "${tmp_dir}/${i}.result" ) &
+        pids+=("$!")
+    done
+
+    if [[ ${#pids[@]} -gt 0 ]]; then
+        wait "${pids[@]}" 2>/dev/null
+    fi
+
+    echo "$i" > "${tmp_dir}/.count"
+    echo "$tmp_dir"
+}
+
 # ============================================================ #
 #                     ЗАПУСК ПРОВЕРКИ И ОТЧЁТ                  #
 # ============================================================ #
@@ -144,10 +303,17 @@ _skynet_censorcheck_run_and_report() {
     [[ "$mode" == "--cron" ]] && verbose=0
 
     ensure_package "curl" >/dev/null 2>&1 || true
+    ensure_package "python3" >/dev/null 2>&1 || true
 
     if [[ -z "${TG_BOT_TOKEN:-}" || -z "${TG_CHAT_ID:-}" ]]; then
         [[ "$verbose" -eq 1 ]] && printf_error "TG_BOT_TOKEN/TG_CHAT_ID не настроены (пункт [n])."
         log "CensorCheck: TG_BOT_TOKEN/TG_CHAT_ID не настроены, отчёт не отправлен."
+        return 1
+    fi
+
+    if [[ -z "${RIPE_API_KEY:-}" ]]; then
+        [[ "$verbose" -eq 1 ]] && printf_error "RIPE_API_KEY не настроен (пункт [k])."
+        log "CensorCheck: RIPE_API_KEY не настроен, отчёт не отправлен."
         return 1
     fi
 
@@ -157,35 +323,50 @@ _skynet_censorcheck_run_and_report() {
         return 1
     fi
 
-    if [[ ! -f "$_CENSORCHECK_PLUGIN" ]]; then
-        [[ "$verbose" -eq 1 ]] && printf_error "Плагин не найден: $_CENSORCHECK_PLUGIN"
-        log "CensorCheck: плагин не найден ($_CENSORCHECK_PLUGIN)."
+    if [[ ! -f "$_TSPU_PROBE_SCRIPT" ]]; then
+        [[ "$verbose" -eq 1 ]] && printf_error "Скрипт проверки не найден: $_TSPU_PROBE_SCRIPT"
+        log "CensorCheck: tspu_probe.py не найден."
         return 1
     fi
 
-    [[ "$verbose" -eq 1 ]] && printf_info "Проверяю все серверы флота одновременно (параллельно)..."
+    local sni="${TSPU_REALITY_SNI:-max.ru}"
 
-    local tmp_dir; tmp_dir=$(_skynet_run_plugin_on_fleet_parallel_capture "$_CENSORCHECK_PLUGIN")
+    [[ "$verbose" -eq 1 ]] && printf_info "Проверяю доступность всех серверов флота из сетей РФ (RIPE Atlas, параллельно)..."
+
+    local tmp_dir; tmp_dir=$(_skynet_tspu_check_fleet_parallel "$sni" "$RIPE_API_KEY")
     local count; count=$(cat "${tmp_dir}/.count" 2>/dev/null || echo 0)
 
-    # Доступные серверы - просто зелёная галочка, компактным списком.
-    # Недоступные - прячем в сворачиваемую (expandable) цитату Telegram,
-    # чтобы в обычный день отчёт был коротким списком из одних ✅.
-    local ok_list="" fail_list=""
-    local total=0 failed=0 idx name status esc_name
+    # ✅ доступен - компактный список.
+    # ❌ заблокирован - сворачиваемая (expandable) цитата со списком и деталями.
+    # 🔍 пропуск (не удалось проверить) - отдельная сворачиваемая цитата,
+    # требует ручной проверки, не считается ни "доступен", ни "заблокирован".
+    local ok_list="" fail_list="" skip_list=""
+    local total=0 blocked_n=0 skip_n=0 idx name result kind detail esc_name
 
     for ((idx = 1; idx <= count; idx++)); do
         name=$(cat "${tmp_dir}/${idx}.name" 2>/dev/null)
-        status=$(cat "${tmp_dir}/${idx}.status" 2>/dev/null)
+        result=$(cat "${tmp_dir}/${idx}.result" 2>/dev/null)
         total=$((total + 1))
         esc_name=$(_skynet_censorcheck_html_escape "$name")
 
-        if [[ "$status" == "OK" ]]; then
-            ok_list+="✅ ${esc_name}"$'\n'
-        else
-            failed=$((failed + 1))
-            fail_list+="${esc_name}"$'\n'
-        fi
+        kind="${result%% *}"
+        detail="${result#* }"
+        [[ "$detail" == "$result" ]] && detail=""
+        detail=$(_skynet_censorcheck_html_escape "$detail")
+
+        case "$kind" in
+            AVAILABLE)
+                ok_list+="✅ ${esc_name}"$'\n'
+                ;;
+            BLOCKED)
+                blocked_n=$((blocked_n + 1))
+                fail_list+="${esc_name} — ${detail}"$'\n'
+                ;;
+            *)
+                skip_n=$((skip_n + 1))
+                skip_list+="${esc_name}${detail:+ — ${detail}}"$'\n'
+                ;;
+        esac
     done
     rm -rf "$tmp_dir"
 
@@ -193,14 +374,18 @@ _skynet_censorcheck_run_and_report() {
     report+="${ok_list}"
 
     if [[ -n "$fail_list" ]]; then
-        report+=$'\n'"<blockquote expandable>❌ Недоступны (${failed}):"$'\n'"${fail_list}</blockquote>"$'\n'
+        report+=$'\n'"<blockquote expandable>❌ Заблокированы (${blocked_n}):"$'\n'"${fail_list}</blockquote>"$'\n'
     fi
 
-    report+=$'\n'"Итого: ${total} серверов, ${failed} недоступно."
+    if [[ -n "$skip_list" ]]; then
+        report+=$'\n'"<blockquote expandable>🔍 Требуют ручной проверки (${skip_n}):"$'\n'"${skip_list}</blockquote>"$'\n'
+    fi
+
+    report+=$'\n'"Итого: ${total} серверов, ${blocked_n} заблокировано, ${skip_n} пропущено."
 
     if _skynet_censorcheck_tg_send "$report"; then
-        [[ "$verbose" -eq 1 ]] && printf_ok "Отчёт отправлен в Telegram (${total} серверов, ${failed} недоступно)."
-        log "CensorCheck: отчёт отправлен (${total} серверов, ${failed} недоступно)."
+        [[ "$verbose" -eq 1 ]] && printf_ok "Отчёт отправлен в Telegram (${total} серверов, ${blocked_n} заблокировано, ${skip_n} пропущено)."
+        log "CensorCheck: отчёт отправлен (${total} серверов, ${blocked_n} заблокировано, ${skip_n} пропущено)."
         return 0
     else
         [[ "$verbose" -eq 1 ]] && printf_error "Не удалось отправить отчёт в Telegram."
@@ -257,12 +442,15 @@ _skynet_censorcheck_menu() {
     while true; do
         clear
         menu_header "📡 Отчёт «Блокировка ТСПУ» в Telegram"
-        printf_description "Ежедневно запускает проверку DPI-блокировок на всех серверах"
-        printf_description "флота и присылает сводный отчёт в Telegram."
+        printf_description "Ежедневно бьёт зондами RIPE Atlas (сети РФ-операторов) в IP"
+        printf_description "каждого сервера флота и присылает сводный отчёт в Telegram."
         echo ""
 
         local tg_status="${C_RED}не настроен${C_RESET}"
         [[ -n "${TG_BOT_TOKEN:-}" && -n "${TG_CHAT_ID:-}" ]] && tg_status="${C_GREEN}настроен${C_RESET}"
+
+        local ripe_status="${C_RED}не настроен${C_RESET}"
+        [[ -n "${RIPE_API_KEY:-}" ]] && ripe_status="${C_GREEN}настроен${C_RESET}"
 
         local cron_status="${C_RED}выключен${C_RESET}"
         if [[ -f "$_CENSORCHECK_CRON_FILE" ]]; then
@@ -272,10 +460,12 @@ _skynet_censorcheck_menu() {
         fi
 
         printf_description "Telegram:          ${tg_status}"
+        printf_description "RIPE Atlas ключ:   ${ripe_status}"
         printf_description "Ежедневный запуск: ${cron_status}"
         echo ""
 
         printf_menu_option "n" "Настроить TG_BOT_TOKEN / TG_CHAT_ID"
+        printf_menu_option "k" "Настроить RIPE Atlas API-ключ / SNI"
         printf_menu_option "e" "Включить/изменить ежедневный запуск"
         printf_menu_option "d" "Выключить ежедневный запуск"
         printf_menu_option "r" "Запустить проверку и отчёт СЕЙЧАС"
@@ -286,11 +476,15 @@ _skynet_censorcheck_menu() {
         local choice; choice=$(safe_read "Выбор: " "") || { _LAST_CTRLC_SIGNALED=0; continue; }
         case "$choice" in
             [nN]) _skynet_censorcheck_configure_telegram ;;
+            [kK]) _skynet_censorcheck_configure_ripe ;;
             [eE]) _skynet_censorcheck_install_cron ;;
             [dD]) _skynet_censorcheck_remove_cron ;;
             [rR])
                 if [[ -z "${TG_BOT_TOKEN:-}" || -z "${TG_CHAT_ID:-}" ]]; then
                     printf_error "Сначала настрой Telegram [n]."
+                    sleep 1
+                elif [[ -z "${RIPE_API_KEY:-}" ]]; then
+                    printf_error "Сначала настрой RIPE Atlas ключ [k]."
                     sleep 1
                 else
                     echo ""
