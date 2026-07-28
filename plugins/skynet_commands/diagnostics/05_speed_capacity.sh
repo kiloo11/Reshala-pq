@@ -1,9 +1,9 @@
 #!/bin/bash
-# TITLE: Умный замер (скорость + вместимость)
+# TITLE: Измерение скорости и вместимости
 # SKYNET_HIDDEN: false
 # SKYNET_COLOR: yellow
-# Плагин для Скайнета: гоняет Ookla-спидтест на сервере и считает,
-# сколько VPN-юзеров он потянет.
+# Плагин для Скайнета: измеряет скорость канала через Ookla и считает,
+# сколько VPN-пользователей потянет сервер.
 #
 # Формула вместимости — копия локального «Умного замера» из
 # modules/local/local_care.sh (_calculate_vpn_capacity): берём самое узкое
@@ -27,7 +27,7 @@ _ensure_speedtest() {
     fi
 
     if ! command -v curl >/dev/null 2>&1 || ! command -v tar >/dev/null 2>&1; then
-        echo "Нет curl или tar — ставить Speedtest нечем."
+        echo "Не найдены curl или tar: установка Speedtest невозможна."
         return 1
     fi
 
@@ -37,7 +37,7 @@ _ensure_speedtest() {
         x86_64)  tgz_name="ookla-speedtest-1.2.0-linux-x86_64.tgz" ;;
         aarch64) tgz_name="ookla-speedtest-1.2.0-linux-aarch64.tgz" ;;
         *)
-            echo "Неизвестная архитектура: ${arch}. Speedtest не поставить."
+            echo "Неподдерживаемая архитектура: ${arch}. Установка Speedtest невозможна."
             return 1
             ;;
     esac
@@ -50,7 +50,7 @@ _ensure_speedtest() {
     if ! curl -fsL --connect-timeout 15 "${SPEEDTEST_MIRROR_1}/${tgz_name}" -o "$tgz"; then
         if ! curl -fsL --connect-timeout 15 "${SPEEDTEST_MIRROR_2}/${tgz_name}" -o "$tgz"; then
             rm -f "$tgz"
-            echo "Не скачал Speedtest ни с сайта, ни с зеркала."
+            echo "Не удалось загрузить Speedtest ни с официального сайта, ни с зеркала."
             return 1
         fi
     fi
@@ -58,7 +58,7 @@ _ensure_speedtest() {
     mkdir -p "$unpack_dir"
     if ! tar -xzf "$tgz" -C "$unpack_dir" 2>/dev/null || [[ ! -f "${unpack_dir}/speedtest" ]]; then
         rm -rf "$tgz" "$unpack_dir"
-        echo "Архив Speedtest битый — внутри нет бинарника."
+        echo "Архив Speedtest повреждён: исполняемый файл не найден."
         return 1
     fi
 
@@ -171,7 +171,7 @@ _calculate_capacity() {
 
     if (( net_limit < hw_limit )) && (( net_limit > 0 )); then
         echo "$net_limit"
-        echo "Канал"
+        echo "канал"
     else
         echo "$hw_limit"
         echo "$hw_reason"
@@ -180,18 +180,35 @@ _calculate_capacity() {
 
 # --- Главная логика -------------------------------------------------------- #
 
+# Склонение существительного по числу: 1 пользователь, 2 пользователя,
+# 5 пользователей. Отчёт читают люди, и «102 пользователей» в официальном
+# тоне выглядит опечаткой.
+_users_word() {
+    local n="$1"
+    local n100=$((n % 100)) n10=$((n % 10))
+    if (( n100 >= 11 && n100 <= 14 )); then
+        echo "пользователей"
+    elif (( n10 == 1 )); then
+        echo "пользователь"
+    elif (( n10 >= 2 && n10 <= 4 )); then
+        echo "пользователя"
+    else
+        echo "пользователей"
+    fi
+}
+
 run() {
-    echo "===== УМНЫЙ ЗАМЕР ====="
+    echo "===== ИЗМЕРЕНИЕ СКОРОСТИ И ВМЕСТИМОСТИ ====="
 
     if ! _ensure_speedtest; then
-        echo "Замер не выполнен."
+        echo "Измерение не выполнено."
         return 1
     fi
 
     local json
     json=$(speedtest --accept-license --accept-gdpr -f json 2>/dev/null)
     if [[ -z "$json" ]]; then
-        echo "Speedtest вернул пустоту (нет сети или сервер Ookla недоступен)."
+        echo "Speedtest не вернул данных: нет сети или сервер Ookla недоступен."
         return 1
     fi
 
@@ -201,7 +218,7 @@ run() {
     ul_bytes=$(_json_num "$json" "upload" "bandwidth")
 
     if [[ -z "$ul_bytes" || ! "$ul_bytes" =~ ^[0-9]+$ ]]; then
-        echo "Не разобрал ответ Speedtest — замер не засчитан."
+        echo "Не удалось разобрать ответ Speedtest: измерение не засчитано."
         return 1
     fi
 
@@ -214,11 +231,11 @@ run() {
     { read -r capacity; read -r reason; } < <(_calculate_capacity "$ul_mbps")
 
     if [[ -n "$ping" && "$ping" != "null" ]]; then
-        LC_NUMERIC=C printf "Ping:        %.2f ms\n" "$ping"
+        LC_NUMERIC=C printf "Задержка:    %.2f мс\n" "$ping"
     fi
-    echo "Скачка:      ${dl_mbps} Mbit/s"
-    echo "Отдача:      ${ul_mbps} Mbit/s"
-    echo "Вместимость: ${capacity} юзеров (Упор в ${reason})"
+    echo "Приём:       ${dl_mbps} Мбит/с"
+    echo "Передача:    ${ul_mbps} Мбит/с"
+    echo "Вместимость: ${capacity} $(_users_word "$capacity") (ограничение: ${reason})"
 
     # Машиночитаемый хвост для modules/skynet/capacity.sh — строго последней
     # строкой и строго в этом формате.

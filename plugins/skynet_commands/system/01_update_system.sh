@@ -1,5 +1,5 @@
 #!/bin/bash
-# TITLE: Обновить систему (full-upgrade + чистка)
+# TITLE: Обновление системы (full-upgrade и очистка)
 # SKYNET_HIDDEN: false
 #
 # Плагин для Скайнета: обновляет пакеты и сразу подчищает за собой.
@@ -38,7 +38,7 @@ fi
 
 # Проверяем, что это Debian-based система
 if ! command -v apt-get &>/dev/null; then
-    warn "Это не Debian/Ubuntu, пропускаю."
+    warn "Система не Debian/Ubuntu: обновление пропущено."
     exit 0
 fi
 
@@ -61,30 +61,30 @@ _disk_free_kb() {
 
 free_before=$(_disk_free_kb)
 
-info "Обновляю списки пакетов (apt update)..."
+info "Обновление списков пакетов (apt update)..."
 if ! apt-get update -qq; then
-    err "apt update не прошёл: репозитории недоступны или релиз снят с поддержки (EOL)."
+    err "Ошибка apt update: репозитории недоступны или релиз снят с поддержки (EOL)."
 fi
 
-info "Ставлю обновления (full-upgrade)..."
+info "Установка обновлений (full-upgrade)..."
 upgrade_log=$(apt-get full-upgrade "${APT_OPTS[@]}" 2>&1) || {
     printf '%s\n' "$upgrade_log" | tail -n 15
-    err "Обновление пакетов сорвалось."
+    err "Обновление пакетов завершилось с ошибкой."
 }
 ok "Обновлено пакетов: $(_apt_count "$upgrade_log" "upgraded")"
 
 # Чистка. Если она отвалится - это не повод считать обновление неудачным,
 # поэтому здесь warn, а не err.
-info "Сношу осиротевшие пакеты (autoremove)..."
+info "Удаление неиспользуемых пакетов (autoremove)..."
 if remove_log=$(apt-get autoremove "${APT_OPTS[@]}" 2>&1); then
-    ok "Снесено лишних пакетов: $(_apt_count "$remove_log" "to remove")"
+    ok "Удалено пакетов: $(_apt_count "$remove_log" "to remove")"
 else
-    warn "autoremove отработал с ошибкой, иду дальше."
+    warn "autoremove завершился с ошибкой, выполнение продолжено."
 fi
 
-info "Чищу кэш скачанных пакетов (autoclean)..."
+info "Очистка кэша пакетов (autoclean)..."
 if ! apt-get autoclean -y >/dev/null 2>&1; then
-    warn "autoclean отработал с ошибкой, иду дальше."
+    warn "autoclean завершился с ошибкой, выполнение продолжено."
 fi
 
 free_after=$(_disk_free_kb)
@@ -93,7 +93,7 @@ if (( freed_mb > 0 )); then
     ok "Освобождено на диске: ${freed_mb} МБ"
 else
     # Обновление само по себе занимает место - это норма, а не ошибка.
-    info "Место на диске: ${freed_mb} МБ (обновления заняли больше, чем чистка освободила)"
+    info "Изменение свободного места: ${freed_mb} МБ (обновления заняли больше, чем освободила очистка)"
 fi
 
 # Ядро и libc докатываются только после ребута - на флоте это надо видеть
@@ -102,5 +102,5 @@ if [[ -f /var/run/reboot-required ]]; then
     warn "ТРЕБУЕТСЯ ПЕРЕЗАГРУЗКА (обновилось ядро или системные библиотеки)."
 fi
 
-ok "Обновление и чистка завершены."
+ok "Обновление и очистка завершены."
 exit 0

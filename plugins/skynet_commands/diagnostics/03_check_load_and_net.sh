@@ -1,5 +1,5 @@
 #!/bin/bash
-# TITLE: Нагрузка и сеть (top по CPU, ip addr/route)
+# TITLE: Нагрузка и сеть (процессы по CPU, адреса и маршруты)
 # SKYNET_HIDDEN: false
 # Плагин для Скайнета: показывает нагрузку и базовую сетевую инфу.
 #
@@ -8,11 +8,11 @@ run() {
     echo "===== LOAD AVERAGE ====="
     uptime
     echo ""
-    echo "===== ТОП-5 ПРОЦЕССОВ ПО CPU ====="
+    echo "===== 5 ПРОЦЕССОВ С НАИБОЛЬШЕЙ НАГРУЗКОЙ НА CPU ====="
     if command -v ps >/dev/null 2>&1; then
         ps aux --sort=-%cpu | head -n 6
     else
-        echo "ps недоступен."
+        echo "Утилита ps недоступна."
     fi
     echo ""
     echo "===== СЕТЬ (ip -4 addr / route) ====="
@@ -21,7 +21,7 @@ run() {
         echo ""
         ip route show
     else
-        echo "ip недоступен."
+        echo "Утилита ip недоступна."
     fi
 }
 

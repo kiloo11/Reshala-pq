@@ -185,7 +185,7 @@ _skynet_run_plugin_on_fleet_parallel() {
     fi
 
     local total; total=$(grep -c . "$FLEET_DATABASE_FILE" 2>/dev/null || echo 0)
-    printf_info "Запускаю '${plugin##*/}' параллельно на ${total} серверах. Жду завершения всех..."
+    printf_info "Команда '${plugin##*/}' запущена параллельно на ${total} серверах. Ожидание завершения..."
 
     local tmp_dir; tmp_dir=$(_skynet_run_plugin_on_fleet_parallel_capture "$plugin")
     local count; count=$(cat "${tmp_dir}/.count" 2>/dev/null || echo 0)
@@ -214,9 +214,8 @@ _skynet_run_plugin_on_fleet_parallel() {
 }
 
 # Переводит имя цвета из заголовка плагина (# SKYNET_COLOR: yellow) в код
-# из common.sh. Список закрытый и разворачивается через indirect expansion,
-# а не eval: заголовок плагина — это просто текст из файла, и он не должен
-# уметь выполнить что-то своё.
+# из common.sh. Список закрытый: заголовок плагина — это просто текст из
+# файла, и он не должен уметь выполнить что-то своё.
 _skynet_plugin_color() {
     local name="${1,,}"
     case "$name" in
@@ -329,20 +328,20 @@ _run_fleet_command() {
 
         echo ""
         printf_info "Где выполнять команду?"
-        printf_menu_option "1" "На ВСЁМ флоте"
-        printf_menu_option "2" "На ОДНОМ выбранном сервере"
+        printf_menu_option "1" "На всём флоте"
+        printf_menu_option "2" "На одном выбранном сервере"
         local scope; scope=$(safe_read "Выбор (1/2): " "1") || { _LAST_CTRLC_SIGNALED=0; continue; }
 
         if [[ "$scope" == "2" ]]; then
             if [[ ! -s "$FLEET_DATABASE_FILE" ]]; then
-                printf_error "База флота пуста. Сначала добавь серверы."
+                printf_error "База флота пуста. Добавьте серверы."
                 wait_for_enter
                 continue
             fi
 
             local servers=(); local idx=1
             echo ""
-            printf_info "Доступные сервера:"
+            printf_info "Доступные серверы:"
             while IFS='|' read -r name user ip port key_path sudo_pass; do
                 servers[$idx]="$name|$user|$ip|$port|$key_path|$sudo_pass"
                 printf "   [%d] %s (%s@%s:%s)\n" "$idx" "$name" "$user" "$ip" "$port"
@@ -353,14 +352,14 @@ _run_fleet_command() {
             s_choice=$(ask_number_in_range "Номер сервера: " 1 "$((idx-1))" "") || continue
             if [[ -n "${servers[$s_choice]:-}" ]]; then
                 IFS='|' read -r name user ip port key_path sudo_pass <<< "${servers[$s_choice]}"
-                printf_warning "Выполняю '${selected_plugin##*/}' на сервере '$name'."
+                printf_warning "Команда '${selected_plugin##*/}' будет выполнена на сервере '$name'."
                 if ask_yes_no "Начать? (y/n): " "n"; then
                     _skynet_run_plugin_on_server "$selected_plugin" "$name" "$user" "$ip" "$port" "$key_path" "$sudo_pass"
                     printf_ok "Команда выполнена."; wait_for_enter
                 fi
             fi
         else
-            printf_warning "Выполняю '${selected_plugin##*/}' на ВСЁМ флоте ОДНОВРЕМЕННО (параллельно)."
+            printf_warning "Команда '${selected_plugin##*/}' будет выполнена на всём флоте одновременно (параллельно)."
             if ask_yes_no "Начать? (y/n): " "n"; then
                 _skynet_run_plugin_on_fleet_parallel "$selected_plugin"
                 wait_for_enter
