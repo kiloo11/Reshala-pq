@@ -1,7 +1,7 @@
 #!/bin/bash
 # TITLE: Измерение скорости и вместимости
 # SKYNET_HIDDEN: false
-# SKYNET_COLOR: yellow
+# SKYNET_COLOR: green
 # Плагин для Скайнета: измеряет скорость канала через Ookla и считает,
 # сколько VPN-пользователей потянет сервер.
 #

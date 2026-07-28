@@ -12,7 +12,7 @@
 # headless из cron (см. reshala.sh -> censorcheck-report).
 #
 # @menu.manifest
-# @item( skynet | t | 📡 Отчёт "Блокировка ТСПУ" в Telegram | _skynet_censorcheck_menu | 50 | 2 | Ежедневная проверка блокировок ТСПУ по флоту через RIPE Atlas с отчётом в Telegram. )
+# @item( skynet | t | ${C_RED}📡 Отчёт "Блокировка ТСПУ" в Telegram${C_RESET} | _skynet_censorcheck_menu | 50 | 2 | Ежедневная проверка блокировок ТСПУ по флоту через RIPE Atlas с отчётом в Telegram. )
 #
 
 [[ "${BASH_SOURCE[0]}" == "${0}" ]] && exit 1 # Защита от прямого запуска

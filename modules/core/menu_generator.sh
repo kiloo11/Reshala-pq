@@ -190,7 +190,18 @@ render_menu_items() {
             title="${title//\$\{${_var_name}\}/${!_var_name}}"
         done
         
-        printf_menu_option "$key" "$title"
+        # Если название НАЧИНАЕТСЯ с цвета — красим им и скобку с клавишей.
+        # Иначе подсвеченный пункт выходит наполовину закрашенным: белое "[p]"
+        # и цветной заголовок. Цвет в середине названия (вроде "(Мусорка)")
+        # под это правило не попадает — там подсветка и задумана частичной.
+        # В common.sh цвета лежат литералами "\033[...m", а не символом ESC,
+        # поэтому и сравниваем с текстом.
+        local line_color=""
+        if [[ "$title" == '\033['* ]]; then
+            line_color="${title%%m*}m"
+        fi
+
+        printf_menu_option "$key" "$title" "$line_color"
         if [[ -n "$desc" ]]; then
             printf_description "${C_GRAY}${desc}${C_RESET}"
         fi
