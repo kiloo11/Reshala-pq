@@ -136,56 +136,11 @@ Docker — мощный инструмент, но он любит пожира�
   <summary><b>📥 УСТАНОВКА</b></summary>
 
   <br>
-  
-Один раз. Навсегда. Копируй, вставляй, жми Enter.
-
-  <br>
-  
-### Стабильная ветка (main)
 
 ```bash
-wget -O install.sh https://raw.githubusercontent.com/DonMatteoVPN/Reshala-Remnawave-Bedolaga/main/install.sh \
+wget -O install.sh https://raw.githubusercontent.com/kiloo11/Reshala-pq/main/install.sh \
   && bash install.sh \
   && reshala
-```
-
-  <br>
-  
-### Ветка разработчика (dev) — тестовая версия
-
-⚠️ **НЕ ДЛЯ ПРОДАКШЕНА**:
-
-```bash
-wget -O install.sh https://raw.githubusercontent.com/DonMatteoVPN/Reshala-Remnawave-Bedolaga/dev/install.sh \
-  && bash install.sh \
-  && reshala
-```
-
-### Если не работает команда reshala выполни команды ниже
-
-```bash
-# 1. Убрать алиас из текущей сессии
-unalias reshala 2>/dev/null
-
-# 2. Убрать из .bashrc
-sed -i "/alias reshala=/d" /root/.bashrc
-
-# 3. Создать умный враппер вручную
-cat > /usr/local/bin/reshala << 'EOF'
-#!/bin/bash
-TARGET="/opt/reshala/reshala.sh"
-if [[ $EUID -eq 0 ]]; then
-    exec "$TARGET" "$@"
-elif command -v sudo >/dev/null 2>&1; then
-    exec sudo "$TARGET" "$@"
-else
-    exec "$TARGET" "$@"
-fi
-EOF
-chmod +x /usr/local/bin/reshala
-
-# 4. Запуск
-reshala
 ```
 
 </details>

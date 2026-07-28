@@ -112,18 +112,8 @@ I'm constantly working on the project. Here's what I plan to implement in the ne
 
 ## 📥 INSTALLATION
 
-Once. Forever. Copy, paste, press Enter.
-
-### Stable branch (main):
 ```bash
-wget -O install.sh https://raw.githubusercontent.com/DonMatteoVPN/Reshala-Remnawave-Bedolaga/main/install.sh \
-  && bash install.sh \
-  && reshala
-```
-
-### Dev branch (dev) — **NOT for production**
-```bash
-wget -O install.sh https://raw.githubusercontent.com/DonMatteoVPN/Reshala-Remnawave-Bedolaga/dev/install.sh \
+wget -O install.sh https://raw.githubusercontent.com/kiloo11/Reshala-pq/main/install.sh \
   && bash install.sh \
   && reshala
 ```
