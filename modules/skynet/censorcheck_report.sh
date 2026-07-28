@@ -20,6 +20,12 @@
 _CENSORCHECK_CRON_FILE="/etc/cron.d/reshala-censorcheck"
 _TSPU_PROBE_SCRIPT="${SCRIPT_DIR}/modules/skynet/tspu_probe.py"
 
+# Время запуска и отметка в отчёте — всегда московские, независимо от часового
+# пояса сервера (у VPS это почти всегда UTC, и отчёт приходил на 3 часа позже,
+# чем просил пользователь).
+_CENSORCHECK_TZ="Europe/Moscow"
+_CENSORCHECK_TZ_OFFSET_MIN=180   # МСК = UTC+3 круглый год, перехода на лето нет
+
 # Те же ASN российских операторов, что и в исходном censorcheck.sh -
 # только для перевода номера ASN в человекочитаемое имя в отчёте.
 declare -A _TSPU_ASN_NAMES=(
@@ -370,7 +376,7 @@ _skynet_censorcheck_run_and_report() {
     done
     rm -rf "$tmp_dir"
 
-    local report="🛡 <b>Блокировка ТСПУ — отчёт по флоту</b>"$'\n'"$(date '+%Y-%m-%d %H:%M')"$'\n\n'
+    local report="🛡 <b>Блокировка ТСПУ — отчёт по флоту</b>"$'\n'"$(TZ="$_CENSORCHECK_TZ" date '+%Y-%m-%d %H:%M') МСК"$'\n\n'
     report+="${ok_list}"
 
     if [[ -n "$fail_list" ]]; then
@@ -406,20 +412,63 @@ _skynet_censorcheck_cron_exec_path() {
     fi
 }
 
+# Понимает ли установленный cron переменную CRON_TZ (Vixie-cron в Debian/Ubuntu
+# и cronie — да, busybox crond — нет). Ищем литерал прямо в бинарнике: man-страниц
+# на голом сервере может не быть, а в cron с поддержкой строка есть всегда.
+_skynet_censorcheck_cron_has_tz() {
+    local bin
+    for bin in /usr/sbin/cron /usr/sbin/crond /usr/bin/crond /sbin/cron; do
+        [[ -x "$bin" ]] || continue
+        grep -qa "CRON_TZ" "$bin" 2>/dev/null && return 0
+    done
+    return 1
+}
+
+# Переводит московское время в локальное время сервера — для cron без CRON_TZ.
+# Считаем арифметикой по текущему смещению сервера (date +%z), а не через
+# `date -d "TZ=..."`: последнее есть только в GNU date. Печатает "часы минуты".
+# Если сам сервер живёт в зоне с переходом на лето, задание после перевода
+# стрелок сдвинется на час — на UTC-серверах (типичный VPS) этого не бывает.
+_skynet_censorcheck_msk_to_local() {
+    local hour="$1" minute="$2"
+    local z; z=$(date +%z)   # вида +0300 / -0500
+    local offset=$(( 10#${z:1:2} * 60 + 10#${z:3:2} ))
+    [[ "${z:0:1}" == "-" ]] && offset=$(( -offset ))
+
+    local total=$(( 10#$hour * 60 + 10#$minute - _CENSORCHECK_TZ_OFFSET_MIN + offset ))
+    total=$(( (total % 1440 + 1440) % 1440 ))
+    echo "$(( total / 60 )) $(( total % 60 ))"
+}
+
 _skynet_censorcheck_install_cron() {
     local hour minute
-    hour=$(ask_number_in_range "Час запуска (0-23)" 0 23 "9") || return
+    hour=$(ask_number_in_range "Час запуска по Москве (0-23)" 0 23 "9") || return
     minute=$(ask_number_in_range "Минута запуска (0-59)" 0 59 "0") || return
 
     local exec_path; exec_path=$(_skynet_censorcheck_cron_exec_path)
+    local msk_time; msk_time=$(printf '%02d:%02d' "$hour" "$minute")
 
+    # Поля cron считаются в часовом поясе сервера. Либо просим считать по Москве
+    # сам cron (CRON_TZ), либо, если он этого не умеет, переводим время сами.
+    local tz_line cron_hour="$hour" cron_minute="$minute"
+    if _skynet_censorcheck_cron_has_tz; then
+        tz_line="CRON_TZ=${_CENSORCHECK_TZ}"
+    else
+        read -r cron_hour cron_minute <<< "$(_skynet_censorcheck_msk_to_local "$hour" "$minute")"
+        tz_line="# Этот cron не понимает CRON_TZ, поэтому ${msk_time} МСК записаны ниже"$'\n'"# как $(printf '%02d:%02d' "$cron_hour" "$cron_minute") по времени сервера."
+    fi
+
+    # Строка "# reshala-msk-time" — источник правды для меню: по полям cron
+    # уже не видно, какое время просил пользователь.
     cat > "$_CENSORCHECK_CRON_FILE" << EOF
 # Reshala: ежедневный отчёт "Блокировка ТСПУ" по флоту Skynet.
 # Управляется через: reshala -> 🌐 Skynet -> [t] -> [e]/[d].
-${minute} ${hour} * * * root ${exec_path} censorcheck-report >> ${LOGFILE} 2>&1
+# reshala-msk-time ${msk_time}
+${tz_line}
+${cron_minute} ${cron_hour} * * * root ${exec_path} censorcheck-report >> ${LOGFILE} 2>&1
 EOF
     chmod 644 "$_CENSORCHECK_CRON_FILE"
-    printf_ok "Ежедневный отчёт запланирован на $(printf '%02d:%02d' "$hour" "$minute")."
+    printf_ok "Ежедневный отчёт запланирован на ${msk_time} по Москве."
     sleep 1
 }
 
@@ -455,8 +504,15 @@ _skynet_censorcheck_menu() {
         local cron_status="${C_RED}выключен${C_RESET}"
         if [[ -f "$_CENSORCHECK_CRON_FILE" ]]; then
             local cron_time
-            cron_time=$(grep -oE '^[0-9]+ [0-9]+' "$_CENSORCHECK_CRON_FILE" 2>/dev/null | awk '{printf "%02d:%02d", $2, $1}')
-            cron_status="${C_GREEN}включен${C_RESET} (${cron_time:-?})"
+            cron_time=$(sed -n 's/^# reshala-msk-time //p' "$_CENSORCHECK_CRON_FILE" 2>/dev/null | head -1)
+            if [[ -n "$cron_time" ]]; then
+                cron_status="${C_GREEN}включен${C_RESET} (${cron_time} МСК)"
+            else
+                # Задание, записанное до перехода на московское время: там время
+                # сервера, и починится оно только пересохранением через [e].
+                cron_time=$(grep -oE '^[0-9]+ [0-9]+' "$_CENSORCHECK_CRON_FILE" 2>/dev/null | awk '{printf "%02d:%02d", $2, $1}')
+                cron_status="${C_GREEN}включен${C_RESET} (${cron_time:-?} по времени сервера — задай заново через [e])"
+            fi
         fi
 
         printf_description "Telegram:          ${tg_status}"
