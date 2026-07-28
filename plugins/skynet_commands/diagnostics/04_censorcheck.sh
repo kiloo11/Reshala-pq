@@ -1,7 +1,7 @@
 #!/bin/bash
 # TITLE: Блокировка ТСПУ
 # SKYNET_HIDDEN: false
-# SKYNET_COLOR: cyan
+# SKYNET_COLOR: red
 # Плагин для Скайнета: скачивает и запускает CensorCheck на удалённом сервере.
 #
 
