@@ -440,6 +440,22 @@ show() {
         print_key_value "Вместимость юзеров" "${C_YELLOW}Газуй в спидтест (меню [${maintenance_key}])${C_RESET}" "$min_label_width"
     fi
 
+    # Сумма вместимости по всему флоту — её считает "Умный замер флота"
+    # (modules/skynet/capacity.sh). Показываем строку, только если замер уже
+    # был: на одиночном сервере без флота это была бы пустая строка-шум.
+    local fleet_capacity; fleet_capacity=$(get_config_var "FLEET_TOTAL_CAPACITY")
+    if [[ -n "$fleet_capacity" ]]; then
+        local fleet_servers; fleet_servers=$(get_config_var "FLEET_CAPACITY_SERVERS")
+        local fleet_date; fleet_date=$(get_config_var "FLEET_CAPACITY_DATE")
+        local fleet_note=""
+        if [[ -n "$fleet_servers" ]]; then
+            fleet_note=" (серверов: ${fleet_servers}${fleet_date:+, ${fleet_date}})"
+        elif [[ -n "$fleet_date" ]]; then
+            fleet_note=" (${fleet_date})"
+        fi
+        print_key_value "Общая вместимость" "${C_GREEN}${fleet_capacity} юзеров${C_RESET}${C_GRAY}${fleet_note}${C_RESET}" "$min_label_width"
+    fi
+
     local shaper_status; shaper_status=$(_get_traffic_limiter_status_string)
     if [[ -n "$shaper_status" ]]; then
         print_key_value "Шейпер трафика" "${C_GREEN}$shaper_status${C_RESET}" "$min_label_width"
