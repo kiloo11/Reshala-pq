@@ -71,7 +71,7 @@ run_update_sequence() {
         if [ $? -eq 0 ]; then 
             printf_ok "Остановлен."
         else 
-            printf_error "Ошибка остановки $dir. Проверь логи."
+            printf_error "Ошибка остановки $dir. Проверьте логи."
         fi
     done
     
@@ -119,7 +119,7 @@ run_update_sequence() {
             if [ $? -eq 0 ]; then
                 printf_ok "Сборка завершена успешно."
             else
-                printf_error "Ошибка сборки $dir. Проверь логи docker compose build."
+                printf_error "Ошибка сборки $dir. Проверьте логи docker compose build."
             fi
         fi
     done

@@ -15,7 +15,7 @@ _perform_install_or_update() {
     
     printf_info "Качаю последнюю версию с GitHub..."
     if ! curl -sL --fail -o "$TEMP_ARCHIVE" "$REPO_ARCHIVE_URL"; then
-        printf_error "Не могу скачать архив. Проверь интернет или настройки в config/reshala.conf"
+        printf_error "Не удалось скачать архив. Проверьте интернет и настройки в config/reshala.conf"
         rm -f "$TEMP_ARCHIVE"; return 1
     fi
 
@@ -91,7 +91,7 @@ WRAPPER_EOF
         sed -i "/alias reshala=/d" /root/.bashrc 2>/dev/null || true
     fi
 
-    warn "ВАЖНО: переподключись к серверу, чтобы команда заработала в новой сессии."
+    warn "ВАЖНО: переподключитесь к серверу, чтобы команда заработала в новой сессии."
 
     # Автозапуск Решалы сразу после установки
     if [[ "${RESHALA_NO_AUTOSTART:-0}" != "1" ]]; then
@@ -103,16 +103,16 @@ WRAPPER_EOF
 }
 
 uninstall_script() {
-    warn "Точно хочешь выгнать Решалу НАХУЙ? УДАЛЮТСЯ ВСЕ ЕЁ ФАЙЛЫ!"
-    if ! ask_yes_no "(y/n): " "n"; then info "Отмена удаления. Решала остаётся."; return; fi
-    info "Начинаю самоликвидацию (удаляю бинарь, каталог /opt/reshala, лог и базу флота)..."
+    warn "Удалить Решалу? Будут удалены все её файлы."
+    if ! ask_yes_no "(y/n): " "n"; then info "Удаление отменено."; return; fi
+    info "Начинаю удаление (исполняемый файл, каталог /opt/reshala, журнал и база флота)..."
     run_cmd rm -f "$INSTALL_PATH"
     run_cmd rm -rf "/opt/reshala"
     # Сносим лог и базу флота, если есть
     if [ -n "${LOGFILE:-}" ]; then run_cmd rm -f "$LOGFILE" 2>/dev/null || true; fi
     if [ -n "${FLEET_DATABASE_FILE:-}" ]; then run_cmd rm -f "$FLEET_DATABASE_FILE" 2>/dev/null || true; fi
     if [ -f "/root/.bashrc" ]; then run_cmd sed -i "/alias reshala='sudo reshala'/d" /root/.bashrc; fi
-    ok "Самоликвидация завершена. Переподключись к серверу, чтобы очистить alias/окружение."
+    ok "Удаление завершено. Переподключитесь к серверу, чтобы очистить alias и окружение."
     exit 0
 }
 
@@ -178,7 +178,7 @@ check_for_updates() {
 run_update() {
     if _perform_install_or_update "update"; then
         log "Скрипт успешно обновлён до версии ${LATEST_VERSION}."
-        ok "Обновление завершено. Теперь у тебя версия ${LATEST_VERSION}."
+        ok "Обновление завершено. Установлена версия ${LATEST_VERSION}."
         info "Перезапускаю Решалу, чтобы все модули подхватили новую версию..."
         sleep 2
         cd / || true

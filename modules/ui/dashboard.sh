@@ -28,7 +28,7 @@ _get_virt_type() {
 
     case "$virt_type_clean" in
         kvm|qemu) result="KVM (Честное железо)" ;;
-        lxc|openvz) result="Container (${virt_type_clean^}) - ⚠️ Хуйня в контейнере (Беги отсюда)" ;; 
+        lxc|openvz) result="Container (${virt_type_clean^}) - ⚠️ Контейнер — не рекомендуется для VPN" ;; 
         none) result="Физический сервер (Дед)" ;;
         *) result="${virt_type_clean^}" ;;
     esac
@@ -336,7 +336,7 @@ show() {
     # --- Секция "Система" (жёсткое выравнивание, как в Primer/install_reshala.sh) ---
     print_section_title "СИСТЕМА"
     print_key_value "ОС / Ядро" "$os_ver ($kernel)" "$min_label_width"
-    print_key_value "Аптайм" "$uptime (Юзеров: $users_online)" "$min_label_width"
+    print_key_value "Время работы" "$uptime (Пользователей: $users_online)" "$min_label_width"
     print_key_value "Виртуалка" "${C_CYAN}$virt${C_RESET}" "$min_label_width"
     print_key_value "IP Адрес" "${C_YELLOW}$ip_addr${C_RESET} ($ping) [${C_CYAN}$location${C_RESET}]" "$min_label_width"
     print_key_value "Хостер" "${C_CYAN}$hoster_info${C_RESET}" "$min_label_width"
@@ -411,7 +411,7 @@ show() {
         "Sub-page подписки")
             print_key_value "Remnawave" "${C_CYAN}Страница подписки (Sub-page)${C_RESET} (${sub_ver_pretty:-unknown})" "$min_label_width"
             ;;
-        "Сервак не целка")
+        "Сторонний софт")
             print_key_value "Remnawave" "${C_RED}НЕ НАЙДЕНО / СТОРОННИЙ СОФТ${C_RESET}" "$min_label_width"
             ;;
         *)
@@ -434,13 +434,13 @@ show() {
     # === ИЗМЕНЕНИЕ: Порядок отображения изменен ===
     local capacity_display; capacity_display=$(get_config_var "LAST_VPN_CAPACITY")
     if [[ -n "$capacity_display" ]]; then
-        print_key_value "Вместимость юзеров" "${C_GREEN}$capacity_display${C_RESET}" "$min_label_width"
+        print_key_value "Вместимость, польз." "${C_GREEN}$capacity_display${C_RESET}" "$min_label_width"
     else
         local maintenance_key; maintenance_key=$(get_key_for_menu_action "show_maintenance_menu" "main")
-        print_key_value "Вместимость юзеров" "${C_YELLOW}Газуй в спидтест (меню [${maintenance_key}])${C_RESET}" "$min_label_width"
+        print_key_value "Вместимость, польз." "${C_YELLOW}Запустите измерение скорости (меню [${maintenance_key}])${C_RESET}" "$min_label_width"
     fi
 
-    # Сумма вместимости по всему флоту — её считает "Умный замер флота"
+    # Сумма вместимости по всему флоту — её считает «Замер вместимости флота»
     # (modules/skynet/capacity.sh). Показываем строку, только если замер уже
     # был: на одиночном сервере без флота это была бы пустая строка-шум.
     local fleet_capacity; fleet_capacity=$(get_config_var "FLEET_TOTAL_CAPACITY")
@@ -453,7 +453,7 @@ show() {
         elif [[ -n "$fleet_date" ]]; then
             fleet_note=" (${fleet_date})"
         fi
-        print_key_value "Общая вместимость" "${C_GREEN}${fleet_capacity} юзеров${C_RESET}${C_GRAY}${fleet_note}${C_RESET}" "$min_label_width"
+        print_key_value "Общая вместимость" "${C_GREEN}${fleet_capacity} польз.${C_RESET}${C_GRAY}${fleet_note}${C_RESET}" "$min_label_width"
     fi
 
     local shaper_status; shaper_status=$(_get_traffic_limiter_status_string)

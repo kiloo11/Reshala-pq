@@ -261,7 +261,7 @@ manage_swap() {
         echo ""
         
         local choice
-        choice=$(safe_read "Твой выбор" "") || break
+        choice=$(safe_read "Ваш выбор" "") || break
         
         case "$choice" in
             1) 

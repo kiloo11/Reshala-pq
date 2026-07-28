@@ -233,7 +233,7 @@ EOF
         local current
         current=$(crontab -u root -l 2>/dev/null || true)
         printf '%s\n%s\n' "$current" "17 3 */14 * * /opt/remnanode/tools/remask.sh >/var/log/remnanode_remask.log 2>&1" | crontab -u root - || {
-            log "не получилось прописать cron для remask.sh. Проверь crontab вручную."
+            log "не удалось прописать cron для remask.sh. Проверьте crontab вручную."
         }
     fi
 }

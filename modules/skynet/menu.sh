@@ -47,7 +47,7 @@ _skynet_is_local_newer() {
 
 _skynet_add_server_wizard() {
     echo
-    printf_info "--- НОВЫЙ БОЕЦ ---"
+    printf_info "--- НОВЫЙ СЕРВЕР ---"
     local s_name; s_name=$(ask_non_empty "Имя сервера: ") || return; s_name="${s_name//|/}"
     local s_ip; s_ip=$(ask_non_empty "IP адрес: ") || return; s_ip="${s_ip//|/}"
     local s_user; s_user=$(safe_read "Пользователь: " "$SKYNET_DEFAULT_USER"); s_user="${s_user//|/}"
@@ -64,7 +64,7 @@ _skynet_add_server_wizard() {
     fi
 
     echo
-    printf_info "Выбери SSH ключ для этого сервера:"
+    printf_info "Выберите SSH-ключ для этого сервера:"
     printf_menu_option "1" "Использовать общий Мастер-ключ"
     printf_menu_option "2" "Создать новый УНИКАЛЬНЫЙ ключ"
     printf_menu_option "3" "Выбрать из списка существующих"
@@ -142,7 +142,7 @@ _skynet_add_server_wizard() {
             fi
         fi
     else
-        printf_error "Не удалось добавить сервер. Проверь данные."
+        printf_error "Не удалось добавить сервер. Проверьте данные."
     fi
     wait_for_enter
 }
@@ -213,7 +213,7 @@ show_fleet_menu() {
         fi
 
         menu_header "🌐 SKYNET: ЦЕНТР УПРАВЛЕНИЯ ФЛОТОМ"
-        printf_description "Здесь ты управляешь базой серверов и запускаешь команды на флоте."
+        printf_description "Управление базой серверов и запуск команд на флоте."
         printf "\n   Авто-скан SSH: ${C_YELLOW}%s${C_RESET} (переключить [s])\n\n" "$auto_scan"
         info "📂 База данных: ${C_GRAY}${FLEET_DATABASE_FILE}${C_RESET}"; printf "\n"; print_separator "-"
         
@@ -285,7 +285,7 @@ _show_server_management_menu() {
                 # ВАЖНО: убираем IdentitiesOnly=yes — он блокирует аутентификацию паролем!
                 # ssh-copy-id должен войти паролем, чтобы скопировать ключ.
                 if ! ssh-copy-id -f -o StrictHostKeyChecking=accept-new -i "${s_key}.pub" -p "$s_port" "${s_user}@${s_ip}"; then
-                    err "Не удалось установить ключ. Проверь пароль или доступность SSH."
+                    err "Не удалось установить ключ. Проверьте пароль и доступность SSH."
                     wait_for_enter
                     return
                 fi
@@ -314,7 +314,7 @@ _show_server_management_menu() {
                 # s_pass остаётся пустым, sudo -n будет использоваться ниже
             else
                 printf "${C_YELLOW}требуется пароль${C_RESET}\n"
-                s_pass=$(ask_password "Введи пароль sudo для '$s_user': ")
+                s_pass=$(ask_password "Введите пароль sudo для '$s_user': ")
                 if [[ -n "$s_pass" ]] && ask_yes_no "Сохранить пароль в базу?" "n"; then
                     server_data="$s_name|$s_user|$s_ip|$s_port|$s_key|$s_pass"
                     _update_fleet_record "$server_idx" "$server_data"
@@ -553,7 +553,7 @@ _show_server_security_menu() {
         _skynet_run_plugin_on_server_with_env "plugins/skynet_commands/security/01_harden_ssh.sh" "$env" "$s_name" "$s_user" "$s_ip" "$s_port" "$s_key" "$s_pass"
     }
     _sss_change_port() {
-        local new_port; new_port=$(ask_number_in_range "Введи новый порт SSH: " 1024 65535 "2222") || return
+        local new_port; new_port=$(ask_number_in_range "Введите новый порт SSH: " 1024 65535 "2222") || return
         local env; env=$(_sss_get_gwl_env)
         env="${env} OLD_SSH_PORT=$s_port NEW_SSH_PORT=$new_port"
         
@@ -593,7 +593,7 @@ _show_server_security_menu() {
     while true; do
         clear
         menu_header "🛡️ Безопасность: ${s_name}"
-        printf_description "Выбери действие для применения на удаленном сервере."
+        printf_description "Выберите действие для применения на удалённом сервере."
         echo ""
 
         render_menu_items "skynet_server_security"
@@ -603,7 +603,7 @@ _show_server_security_menu() {
         print_separator "-"
 
         local choice
-        choice=$(safe_read "Твой выбор, босс") || { return 2; }
+        choice=$(safe_read "Ваш выбор") || { return 2; }
 
         if [[ "$choice" == "b" || "$choice" == "B" ]]; then
             return 2

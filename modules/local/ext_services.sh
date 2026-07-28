@@ -194,7 +194,7 @@ _ext_add_script() {
     clear
     menu_header "➕ Добавить сторонний скрипт"
     echo ""
-    printf_info "Введи название и команду для запуска нового скрипта."
+    printf_info "Введите название и команду для запуска нового скрипта."
     printf_description "Название будет отображаться в меню."
     echo ""
 
@@ -262,7 +262,7 @@ _ext_delete_script() {
     local name; name=$(echo "$entry" | cut -d'|' -f2)
 
     echo ""
-    printf_warning "Ты собираешься удалить: ${C_RED}${name}${C_RESET}"
+    printf_warning "Будет удалён: ${C_RED}${name}${C_RESET}"
     if ask_yes_no "  Точно удалить? (y/n): " "n"; then
         _ext_delete_by_index "$idx"
         printf_ok "Скрипт '${name}' удалён."
@@ -298,12 +298,12 @@ _ext_sort_menu() {
         done < <(_ext_get_sorted)
 
         echo ""
-        printf_info "Введи: ${C_CYAN}ПЕРЕМЕЩАЕМЫЙ_НОМЕР НОВЫЙ_ПОРЯДОК${C_RESET} или [b] для выхода"
+        printf_info "Введите: ${C_CYAN}ПЕРЕМЕЩАЕМЫЙ_НОМЕР НОВЫЙ_ПОРЯДОК${C_RESET} или [b] для выхода"
         printf_description "Например: '3 5' — скрипт #3 получит порядок 5, список перестроится."
         echo ""
 
         local input
-        input=$(safe_read "Твой выбор" "") || break
+        input=$(safe_read "Ваш выбор" "") || break
         [[ "$input" == "b" || "$input" == "B" ]] && break
 
         local move_idx new_order
@@ -311,7 +311,7 @@ _ext_sort_menu() {
         new_order=$(echo "$input" | awk '{print $2}')
 
         if [[ ! "$move_idx" =~ ^[0-9]+$ ]] || [[ ! "$new_order" =~ ^[0-9]+$ ]]; then
-            err "Введи два числа через пробел."; sleep 1; continue
+            err "Введите два числа через пробел."; sleep 1; continue
         fi
 
         if [[ "$move_idx" -lt 1 || "$move_idx" -gt "$count" ]]; then
@@ -348,7 +348,7 @@ show_ext_services_menu() {
         local count; count=$(_ext_count)
 
         if [[ "$count" -eq 0 ]]; then
-            printf_warning "Список скриптов пуст. Добавь первый с помощью [+]."
+            printf_warning "Список скриптов пуст. Добавьте первый через [+]."
             echo ""
         else
             # Вывод пронумерованного меню из БД
@@ -373,7 +373,7 @@ show_ext_services_menu() {
         echo ""
 
         local choice
-        choice=$(safe_read "Твой выбор" "") || break
+        choice=$(safe_read "Ваш выбор" "") || break
 
         case "$choice" in
             +)

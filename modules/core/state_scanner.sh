@@ -9,7 +9,7 @@
 [[ "${BASH_SOURCE[0]}" == "${0}" ]] && exit 1
 
 # Глобальные переменные, которые мы заполняем для других модулей
-SERVER_TYPE="Чистый сервак"
+SERVER_TYPE="Чистый сервер"
 PANEL_VERSION=""
 NODE_VERSION=""
 PANEL_NODE_PATH=""
@@ -162,7 +162,7 @@ scan_remnawave_state() {
         return
     fi
 
-    SERVER_TYPE="Чистый сервак"
+    SERVER_TYPE="Чистый сервер"
     PANEL_VERSION=""
     NODE_VERSION=""
     PANEL_NODE_PATH=""
@@ -176,7 +176,7 @@ scan_remnawave_state() {
     container_names=$(run_cmd docker ps --format '{{.Names}}' 2>/dev/null) || true
 
     if [ -z "$container_names" ]; then
-        SERVER_TYPE="Чистый сервак"
+        SERVER_TYPE="Чистый сервер"
         return
     fi
 
@@ -278,9 +278,9 @@ scan_remnawave_state() {
         NODE_VERSION=$(_state_clean_version "$raw_n_ver")
 
     elif [ $has_foreign -eq 1 ]; then
-        SERVER_TYPE="Сервак не целка"
+        SERVER_TYPE="Сторонний софт"
     else
-        SERVER_TYPE="Чистый сервак"
+        SERVER_TYPE="Чистый сервер"
     fi
 
     # Помечаем, что картина мира по Remnawave/боту собрана и её можно переиспользовать

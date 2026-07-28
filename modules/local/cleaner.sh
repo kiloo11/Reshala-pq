@@ -322,7 +322,7 @@ show_cleaner_menu() {
         echo ""
         printf_menu_option "b" "🔙 Назад"
         
-        local choice; choice=$(safe_read "Твой выбор") || break
+        local choice; choice=$(safe_read "Ваш выбор") || break
         case "$choice" in
             1) _run_with_diff "ПОЛНАЯ УБОРКА" _clean_all_funcs ;;
             2) _run_with_diff "ОЧИСТКА APT" _clean_apt ;;

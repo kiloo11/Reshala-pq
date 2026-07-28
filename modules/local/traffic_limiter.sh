@@ -56,7 +56,7 @@ show_traffic_limiter_menu() {
     # Правильное сравнение версий: (Major < 5) ИЛИ (Major == 5 И Minor < 4)
     if [[ "$k_major" -lt 5 ]] || [[ "$k_major" -eq 5 && "$k_minor" -lt 4 ]]; then
         clear; menu_header "🚦 Шейпер трафика (eBPF)"
-        printf_critical_warning "ОШИБКА: Твое ядро ($kernel_ver) слишком старое для eBPF шейпера (нужно 5.4+)."
+        printf_critical_warning "ОШИБКА: ядро ($kernel_ver) слишком старое для eBPF-шейпера (требуется 5.4+)."
         echo
         echo -e "  ${C_CYAN}══════════════════════════════════════════════════════════════${C_RESET}"
         echo -e "  ${C_YELLOW}📋 ТЕХНИЧЕСКИЙ ОТЧЕТ ДЛЯ ПОДДЕРЖКИ:${C_RESET}"
@@ -69,7 +69,7 @@ show_traffic_limiter_menu() {
         echo -e "  ${C_CYAN}══════════════════════════════════════════════════════════════${C_RESET}"
         echo
         echo -e "  ${C_GREEN}💡 ЧТО ДЕЛАТЬ?${C_RESET}"
-        echo -e "  • Твоему серверу нужно обновить ядро до актуальной версии."
+        echo -e "  • Требуется обновить ядро сервера до актуальной версии."
         echo -e "  • На Ubuntu/Debian: ${C_WHITE}apt update && apt upgrade -y && reboot${C_RESET}"
         echo -e "  • После перезагрузки ядро должно стать 5.15 или выше."
         echo
@@ -101,7 +101,7 @@ show_traffic_limiter_menu() {
         printf_menu_option "9" "🛡️  Белый список (Whitelist)  ${wl_status}"
         echo; printf_menu_option "b" "🔙 Назад"; print_separator "-" 60
 
-        local choice; choice=$(safe_read "Твой выбор") || break
+        local choice; choice=$(safe_read "Ваш выбор") || break
         if [[ "$choice" == "b" || "$choice" == "B" ]]; then break; fi
         case "$choice" in
             1) _tl_list_rules ;;
@@ -202,7 +202,7 @@ _tl_compile_bpf() {
     done
 
     if ! clang -O2 -g -target bpf ${arch_include} -c "${TL_BPF_SRC_PATH}" -o "${TL_BPF_OBJ_PATH}"; then
-        err "Ошибка компиляции eBPF! Проверь наличие заголовков ядра."
+        err "Ошибка компиляции eBPF! Проверьте наличие заголовков ядра."
         return 1
     fi
     ok "Компиляция завершена успешно."
@@ -436,7 +436,7 @@ _tl_ensure_engine_ready() {
 
         if [ ! -e "${TL_BPF_PIN_DIR}/maps/config_map" ]; then
              err "❌ Ошибка: eBPF движок не запустился (config_map не создан)."
-             err "   Проверь: journalctl -u ${TL_SERVICE_NAME} --no-pager -n 30"
+             err "   Проверьте: journalctl -u ${TL_SERVICE_NAME} --no-pager -n 30"
              if uname -r | grep -qi xanmod; then
                  warn "Обнаружено xanmod ядро. Попробуй: apt install linux-tools-xanmod linux-cloud-tools-xanmod"
              fi
@@ -463,7 +463,7 @@ _tl_apply_limit_ebpf_wizard() {
     echo
     echo -e "  ${C_GRAY}─────────────────────────────────────────────────────${C_RESET}"
     echo -e "  ${C_CYAN}ID 0..31. Новое правило — свободный номер.${C_RESET}"
-    echo -e "  ${C_CYAN}Изменить существующее — введи его ID.${C_RESET}"
+    echo -e "  ${C_CYAN}Изменить существующее — введите его ID.${C_RESET}"
     local rule_id; rule_id=$(ask_number_in_range "Номер правила (rule_id)" 0 31 0) || return
 
     # Подгружаем интерфейс из конфига
@@ -500,7 +500,7 @@ _tl_apply_limit_ebpf_wizard() {
 
     # ── Шаг 2: режим ──
     clear; menu_header "eBPF Шейпер: Шаг 2 (Режим)"
-    echo -e "  ${C_YELLOW}💡 Выбери режим шейпинга:${C_RESET}"
+    echo -e "  ${C_YELLOW}💡 Выберите режим шейпинга:${C_RESET}"
     echo -e "  ${C_GRAY}─────────────────────────────────────────────────────${C_RESET}"
     echo -e ""
     echo -e "  ${C_GREEN}[1] Статический${C_RESET} — жёсткий лимит скорости на каждого пользователя"
@@ -517,7 +517,7 @@ _tl_apply_limit_ebpf_wizard() {
     echo -e "      ${C_CYAN}→ Подходит: защита сервера от пропускного коллапса (DDoS)${C_RESET}"
     echo -e ""
     echo -e "  ${C_GRAY}─────────────────────────────────────────────────────${C_RESET}"
-    local mode; mode=$(ask_number_in_range "Выбери режим" 1 3 1) || return
+    local mode; mode=$(ask_number_in_range "Выберите режим" 1 3 1) || return
 
     # ── Шаг 3: порты ──
     clear; menu_header "eBPF Шейпер: Шаг 3 (Порты)"
@@ -538,8 +538,8 @@ _tl_apply_limit_ebpf_wizard() {
         echo -e "  ${C_CYAN}╠══════════════════════════════════════════════════════════╣${C_RESET}"
         echo -e "  ${C_CYAN}║${C_RESET}  ${C_GRAY}Внимание: эта скорость делится на ВСЕХ пользователей порта.${C_RESET}"
         echo -e "  ${C_CYAN}║${C_RESET}  ${C_GRAY}Рекомендуется указывать суммарную емкость канала.${C_RESET}"
-        echo -e "  ${C_CYAN}║${C_RESET}  50 МБ/с   = ~400 Мбит/с  (хватит на ~10-20 юзеров)"
-        echo -e "  ${C_CYAN}║${C_RESET}  100 МБ/с  = ~800 Мбит/с  (хватит на ~20-50 юзеров)"
+        echo -e "  ${C_CYAN}║${C_RESET}  50 МБ/с   = ~400 Мбит/с  (достаточно для ~10-20 польз.)"
+        echo -e "  ${C_CYAN}║${C_RESET}  100 МБ/с  = ~800 Мбит/с  (достаточно для ~20-50 польз.)"
         echo -e "  ${C_CYAN}║${C_RESET}  500 МБ/с  = ~4 Гбит/с    (серьёзный узел)"
         echo -e "  ${C_CYAN}╚══════════════════════════════════════════════════════════╝${C_RESET}"
         echo
@@ -590,8 +590,8 @@ _tl_apply_limit_ebpf_wizard() {
     print_key_value "Правило #" "$rule_id" 25
     print_key_value "Интерфейс" "$iface" 25
     local mode_print="Неизвестно"
-    if [[ "$mode" == "1" ]]; then mode_print="Статика (на 1 юзера)"; fi
-    if [[ "$mode" == "2" ]]; then mode_print="Динамика (на 1 юзера)"; fi
+    if [[ "$mode" == "1" ]]; then mode_print="Статика (на 1 пользователя)"; fi
+    if [[ "$mode" == "2" ]]; then mode_print="Динамика (на 1 пользователя)"; fi
     if [[ "$mode" == "3" ]]; then mode_print="Общая труба (на всех)"; fi
 
     print_key_value "Режим"     "$mode_print" 25
@@ -714,8 +714,8 @@ _tl_generate_ebpf_service_file() {
         printf "%b" "${C_RED}╔════════════════════════════════════════════════════════════╗${C_RESET}\n" >&2
         printf "%b" "${C_RED}║ 🔥 ЯДЕРНОЕ ПРЕДУПРЕЖДЕНИЕ: BPFTOOL НЕ НАЙДЕН!             ║${C_RESET}\n" >&2
         printf "%b" "${C_RED}╠════════════════════════════════════════════════════════════╣${C_RESET}\n" >&2
-        printf "%b" "${C_WHITE}║ Твое ядро или репозиторий блокируют установку BPF-пакетов. ║${C_RESET}\n" >&2
-        printf "%b" "${C_CYAN}║ ЧТО ТЕБЕ НУЖНО СДЕЛАТЬ СЕЙЧАС (ВРУЧНУЮ):                   ║${C_RESET}\n" >&2
+        printf "%b" "${C_WHITE}║ Ядро или репозиторий блокируют установку BPF-пакетов.      ║${C_RESET}\n" >&2
+        printf "%b" "${C_CYAN}║ ЧТО НУЖНО СДЕЛАТЬ ВРУЧНУЮ:                                 ║${C_RESET}\n" >&2
         printf "%b" "${C_YELLOW}║ 1. apt update && apt install -y bpftool                    ║${C_RESET}\n" >&2
         printf "%b" "${C_RED}╚════════════════════════════════════════════════════════════╝${C_RESET}\n" >&2
         return 1
@@ -877,7 +877,7 @@ _tl_edit_whitelist() {
                 sync_out=$(python3 "${TL_CTRL_PY_PATH}" --pin-dir "${TL_BPF_PIN_DIR}/maps" whitelist-sync --file "$whitelist_file" "$global_file" 2>&1)
                 
                 if echo "$sync_out" | grep -q "whitelist_map не найден"; then
-                    warn "Шейпер ещё не загружен в ядро. Нажми [7] для старта."
+                    warn "Шейпер ещё не загружен в ядро. Нажмите [7] для запуска."
                 else
                     ok "Глобальный список успешно подключен и активен!"
                 fi
@@ -986,6 +986,6 @@ _tl_select_interface() {
     local ifaces=($(ip -o link show | awk -F': ' '{print $2}' | grep -v 'lo'))
     if [[ ${#ifaces[@]} -eq 0 ]]; then return 1; fi
     if [[ ${#ifaces[@]} -eq 1 ]]; then echo "${ifaces[0]}"; return 0; fi
-    local choice; choice=$(ask_selection "Выбери интерфейс:" "${ifaces[@]}") || return 1
+    local choice; choice=$(ask_selection "Выберите интерфейс:" "${ifaces[@]}") || return 1
     echo "${ifaces[$((choice-1))]}"
 }

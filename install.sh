@@ -31,7 +31,7 @@ TEMP_DIR=$(mktemp -d /tmp/reshala_bootstrap.XXXXXX)
 
 echo -e "${C_CYAN}[i] Скачиваю последнюю версию из ветки '${REPO_BRANCH}'...${C_RESET}"
 if ! curl -sL --fail -o "${TEMP_DIR}/reshala.tar.gz" "$REPO_ARCHIVE_URL"; then
-    echo -e "${C_RED}[✗] Не удалось скачать архив. Проверь интернет или доступность репозитория.${C_RESET}"
+    echo -e "${C_RED}[✗] Не удалось скачать архив. Проверьте интернет и доступность репозитория.${C_RESET}"
     rm -rf "$TEMP_DIR"
     exit 1
 fi

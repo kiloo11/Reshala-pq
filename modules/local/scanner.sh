@@ -89,10 +89,10 @@ show_geo_help() {
 run_single_scan() {
     clear
     echo -e "${C_MAGENTA}======================================================${C_RESET}"
-    echo -e "${C_BOLD} 🔬 РЕЖИМ: СТРОГИЙ СКАН И ПРОБИВ ЦЕЛИ (OSINT)${C_RESET}"
+    echo -e "${C_BOLD} 🔬 РЕЖИМ: ДЕТАЛЬНЫЙ АНАЛИЗ ЦЕЛИ (OSINT)${C_RESET}"
     echo -e "${C_MAGENTA}======================================================${C_RESET}"
     echo -e "${C_CYAN}Для чего это нужно?${C_RESET}"
-    echo -e "${C_GRAY}Скрипт проверяет конкретный сервер, выдает его полное TLS-досье и ищет${C_RESET}"
+    echo -e "${C_GRAY}Скрипт проверяет конкретный сервер, формирует полный TLS-отчёт и ищет${C_RESET}"
     echo -e "${C_GRAY}сайт хостинг-провайдера (чтобы вы могли арендовать сервер там же).${C_RESET}\n"
 
     read -p ">> Введите цель (IP или Домен): " target
@@ -116,7 +116,7 @@ run_single_scan() {
     echo -e "\n${C_GREEN}[*] ЗАПУСК СКАНИРОВАНИЯ И СБОР ДАННЫХ (OSINT)...${C_RESET}"
     echo -e "${C_RED}⚠️ ВАЖНО: Вы можете прервать процесс, нажав [Ctrl+C] в любой момент!${C_RESET}"
     echo -e "${C_GRAY}Скрипт НЕ закроется. Он просто досрочно остановит проверку портов,${C_RESET}"
-    echo -e "${C_GRAY}сохранит всё, что успел найти, и покажет вам готовое досье.${C_RESET}\n"
+    echo -e "${C_GRAY}сохранит всё, что успел найти, и покажет готовый отчёт.${C_RESET}\n"
     
     local REPORT_OUTPUT=""
     local nl=$'\n'
@@ -127,7 +127,7 @@ run_single_scan() {
     fi
 
     REPORT_OUTPUT+="======================================================${nl}"
-    REPORT_OUTPUT+=" 📄 ПОЛНОЕ ДОСЬЕ НА ЦЕЛЬ: ${safe_target}${nl}"
+    REPORT_OUTPUT+=" 📄 ПОЛНЫЙ ОТЧЁТ ПО ЦЕЛИ: ${safe_target}${nl}"
     REPORT_OUTPUT+="======================================================${nl}"
 
     if [[ -n "$ip_to_check" ]]; then
@@ -156,7 +156,7 @@ run_single_scan() {
     cd "$SCANNER_DIR" || return
     export PATH=/usr/local/go/bin:$PATH
     
-    trap 'echo -e "\n${C_YELLOW}🛑 Процесс прерван пользователем. Формируем досье...${C_RESET}"; break' INT
+    trap 'echo -e "\n${C_YELLOW}🛑 Процесс прерван пользователем. Формирую отчёт...${C_RESET}"; break' INT
 
     for current_port in "${PORT_ARRAY[@]}"; do
         REPORT_OUTPUT+=" >>> СКАНИРОВАНИЕ ПОРТА: ${current_port} <<<${nl}"
@@ -195,7 +195,7 @@ run_single_scan() {
             elif [[ "$line" == *"Cannot dial"* ]]; then
                 found_info=true
                 local tip=$(echo "$line" | grep -oP 'target=\K[^ ]+')
-                REPORT_OUTPUT+=" ❌ [$tip] ОШИБКА: Сервер мертв или порт закрыт${nl}"
+                REPORT_OUTPUT+=" ❌ [$tip] ОШИБКА: Сервер не отвечает или порт закрыт${nl}"
             elif [[ "$line" == *"Failed to get IP"* || "$line" == *"no IP found"* ]]; then
                 found_info=true
                 REPORT_OUTPUT+=" ❌ ОШИБКА: Домен не существует (Невозможно получить IP)${nl}"
@@ -215,14 +215,14 @@ run_single_scan() {
                                 -e "s/ИНФОРМАЦИЯ О ПРОВАЙДЕРЕ/$(printf '\033[1;36m')&$(printf '\033[0m')/"
 
     echo -e "\n${BLUE}======================================================${NC}"
-    read -p ">> Сохранить это досье в Менеджере Отчетов? (Y/n): " keep_recon
+    read -p ">> Сохранить отчёт в Менеджере отчётов? (Y/n): " keep_recon
     if [[ "$keep_recon" =~ ^[nNтТ] ]]; then
-        echo -e "${YELLOW}Досье не сохранено.${NC}"
+        echo -e "${YELLOW}Отчёт не сохранён.${NC}"
     else
         local safe_name=$(echo "$safe_target" | sed 's/[^a-zA-Z0-9А-Яа-яЁё]/_/g')
         local recon_file="$RECON_DIR/recon_${safe_name}_$(date +%s).txt"
         echo "$REPORT_OUTPUT" > "$recon_file"
-        echo -e "${GREEN}Досье успешно сохранено! (Менеджер Отчетов -> 2)${NC}"
+        echo -e "${GREEN}Отчёт сохранён. (Менеджер отчётов -> 2)${NC}"
     fi
     pause
 }
@@ -233,10 +233,10 @@ run_mass_recon() {
 
     clear
     echo -e "${MAGENTA}======================================================${NC}"
-    echo -e "${BOLD} 🕵️ РЕЖИМ: МАССОВЫЙ ПРОБИВ ЦЕЛЕЙ ПО СПИСКУ (OSINT)${NC}"
+    echo -e "${BOLD} 🕵️ РЕЖИМ: МАССОВЫЙ АНАЛИЗ ЦЕЛЕЙ ПО СПИСКУ (OSINT)${NC}"
     echo -e "${MAGENTA}======================================================${NC}"
     echo -e "${GRAY}Скрипт поочередно пробьет каждый IP/Домен из вашего файла in.txt,${NC}"
-    echo -e "${GRAY}найдет сайты хостеров и сохранит в единое гигантское досье.${NC}\n"
+    echo -e "${GRAY}найдёт сайты хостеров и сохранит в единый сводный отчёт.${NC}\n"
 
     echo -e "${BLUE}--- ⚙️ ТОНКАЯ НАСТРОЙКА ---${NC}"
     echo -e "${YELLOW}1. Целевые порты (-port)${NC}"
@@ -249,7 +249,7 @@ run_mass_recon() {
     echo -e "\n${GREEN}[*] ЗАПУСК СКАНИРОВАНИЯ И СБОР ДАННЫХ ПО СПИСКУ...${NC}"
     echo -e "${RED}⚠️ ВАЖНО: Вы можете прервать процесс, нажав [Ctrl+C] в любой момент!${NC}"
     echo -e "${GRAY}Скрипт НЕ закроется. Он просто досрочно остановит перебор списка,${NC}"
-    echo -e "${GRAY}сохранит всё, что успел пробить, и покажет вам готовое Мега-Досье.${NC}\n"
+    echo -e "${GRAY}сохранит всё, что успел проверить, и покажет сводный отчёт.${NC}\n"
     
     local FULL_REPORT=""
     local nl=$'\n'
@@ -272,7 +272,7 @@ run_mass_recon() {
         fi
 
         FULL_REPORT+="======================================================${nl}"
-        FULL_REPORT+=" 📄 ДОСЬЕ НА ЦЕЛЬ: ${safe_target}${nl}"
+        FULL_REPORT+=" 📄 ОТЧЁТ ПО ЦЕЛИ: ${safe_target}${nl}"
         FULL_REPORT+="======================================================${nl}"
 
         if [[ -n "$ip_to_check" ]]; then
@@ -300,7 +300,7 @@ run_mass_recon() {
 
         for current_port in "${PORT_ARRAY[@]}"; do
             FULL_REPORT+=" >>> СКАНИРОВАНИЕ ПОРТА: ${current_port} <<<${nl}"
-            echo -ne "\r\033[K${CYAN}⏳ Пробив: ${YELLOW}${safe_target}${NC} (Порт: ${current_port})...${NC}"
+            echo -ne "\r\033[K${CYAN}⏳ Проверка: ${YELLOW}${safe_target}${NC} (Порт: ${current_port})...${NC}"
             
             local tmp_ghost="tmp_ghost_${current_port}.csv"
             local scan_log=$(./RealiTLScanner -addr "$target" -port "$current_port" -timeout 5 -v -out "$tmp_ghost" 2>&1)
@@ -335,7 +335,7 @@ run_mass_recon() {
                 elif [[ "$line" == *"Cannot dial"* ]]; then
                     found_info=true
                     local tip=$(echo "$line" | grep -oP 'target=\K[^ ]+')
-                    FULL_REPORT+=" ❌ [$tip] ОШИБКА: Сервер мертв или порт закрыт${nl}"
+                    FULL_REPORT+=" ❌ [$tip] ОШИБКА: Сервер не отвечает или порт закрыт${nl}"
                 fi
             done <<< "$scan_log"
 
@@ -354,13 +354,13 @@ run_mass_recon() {
                                 -e "s/ИНФОРМАЦИЯ О ПРОВАЙДЕРЕ/$(printf '\033[1;36m')&$(printf '\033[0m')/"
 
     echo -e "\n${BLUE}======================================================${NC}"
-    read -p ">> Сохранить этот массовый отчет OSINT? (Y/n): " keep_recon
+    read -p ">> Сохранить сводный отчёт OSINT? (Y/n): " keep_recon
     if [[ "$keep_recon" =~ ^[nNтТ] ]]; then
-        echo -e "${YELLOW}Массовое досье не сохранено.${NC}"
+        echo -e "${YELLOW}Сводный отчёт не сохранён.${NC}"
     else
         local recon_file="$RECON_DIR/mass_recon_$(date +%s).txt"
         echo "$FULL_REPORT" > "$recon_file"
-        echo -e "${GREEN}Мега-досье успешно сохранено! (Менеджер Отчетов -> 2)${NC}"
+        echo -e "${GREEN}Сводный отчёт сохранён. (Менеджер отчётов -> 2)${NC}"
     fi
     pause
 }
@@ -733,9 +733,9 @@ manage_csv_reports() {
 manage_recon_reports() {
     while true; do
         clear
-        echo -e "${MAGENTA}=== 📄 ДОСЬЕ НА КОНКРЕТНЫЕ ЦЕЛИ (TXT) ===${NC}"
+        echo -e "${MAGENTA}=== 📄 ОТЧЁТЫ ПО КОНКРЕТНЫМ ЦЕЛЯМ (TXT) ===${NC}"
         mapfile -t TXT_FILES < <(ls -1t "$RECON_DIR"/*.txt 2>/dev/null)
-        if [[ ${#TXT_FILES[@]} -eq 0 ]]; then echo -e "${YELLOW}Сохраненных досье пока нет.${NC}"; pause; return; fi
+        if [[ ${#TXT_FILES[@]} -eq 0 ]]; then echo -e "${YELLOW}Сохранённых отчётов пока нет.${NC}"; pause; return; fi
 
         for i in "${!TXT_FILES[@]}"; do
             local f_size=$(du -sh "${TXT_FILES[$i]}" | awk '{print $1}')
@@ -744,14 +744,14 @@ manage_recon_reports() {
         done
 
         echo -e "\n${BLUE}------------------------------------------------------${NC}"
-        echo -e " 👉 ${YELLOW}НОМЕР${NC} - Открыть досье. | 👉 ${RED}dНОМЕР${NC} - Удалить досье."
-        echo -e " 👉 ${RED}D${NC} - Удалить ВСЕ досье разом."
+        echo -e " 👉 ${YELLOW}НОМЕР${NC} - Открыть отчёт. | 👉 ${RED}dНОМЕР${NC} - Удалить отчёт."
+        echo -e " 👉 ${RED}D${NC} - Удалить ВСЕ отчёты разом."
         echo -e " ${CYAN}0.${NC} Назад"
         read -p ">> " r_choice
         
         [[ "$r_choice" == "0" ]] && return
         if [[ "$r_choice" =~ ^[dDвВ]$ ]]; then
-            read -p "Удалить ВСЕ досье? (y/N): " confirm_del
+            read -p "Удалить ВСЕ отчёты? (y/N): " confirm_del
             [[ "$confirm_del" =~ ^[yYнН] ]] && rm -f "$RECON_DIR"/*.txt 2>/dev/null && echo -e "${GREEN}Очищено!${NC}" && sleep 1
         elif [[ "$r_choice" =~ ^[dDвВ]([0-9]+)$ ]]; then
             local idx=$((${BASH_REMATCH[1]}-1))
@@ -771,8 +771,8 @@ manage_reports_menu() {
         echo -e "${MAGENTA}======================================================${NC}"
         echo -e " ${YELLOW}1.${NC} 📊 Отчеты массового сканирования (CSV)"
         echo -e " ${GRAY}   └─ Результаты работы по подсетям, файлам и URL.${NC}"
-        echo -e " ${YELLOW}2.${NC} 📄 Досье на конкретные цели (TXT)"
-        echo -e " ${GRAY}   └─ Сохраненные пробивы провайдеров и рентген серверов.${NC}"
+        echo -e " ${YELLOW}2.${NC} 📄 Отчёты по конкретным целям (TXT)"
+        echo -e " ${GRAY}   └─ Сохранённые проверки провайдеров и детальные отчёты по серверам.${NC}"
         echo -e " ${CYAN}0.${NC} ↩️ Назад"
         read -p ">> " rm_choice
         case $rm_choice in
@@ -791,7 +791,7 @@ manage_input_file() {
         if [[ ! -f "$INPUT_FILE" ]]; then touch "$INPUT_FILE"; fi
         echo -e " ${YELLOW}1.${NC} 📝 Редактировать список (nano)"
         echo -e " ${YELLOW}2.${NC} 🔍 Запустить массовый скан подсетей (Поиск SNI соседей)"
-        echo -e " ${YELLOW}3.${NC} 🕵️  Запустить массовый ПРОБИВ (OSINT + Рентген)"
+        echo -e " ${YELLOW}3.${NC} 🕵️  Запустить массовый анализ (OSINT + детальная проверка)"
         echo -e " ${CYAN}0.${NC} ↩️  Назад"
         read -p ">> " in_choice
         case $in_choice in
@@ -815,7 +815,7 @@ menu_scanner() {
         echo -e "  Мощный радар для поиска идеальных доменов маскировки."
         echo -e "${BLUE}======================================================${NC}"
         echo -e " ${YELLOW}1.${NC} Строгий скан одного IP / Домена"
-        echo -e " ${GRAY}   └─ Пробив провайдера и полное досье (Рентген) на сервер.${NC}"
+        echo -e " ${GRAY}   └─ Проверка провайдера и полный отчёт по серверу.${NC}"
         echo -e " ${YELLOW}2.${NC} Массовый скан подсети (CIDR)"
         echo -e " ${GRAY}   └─ Главный режим! Ищет лучшие домены среди ваших 'соседей'.${NC}"
         echo -e " ${YELLOW}3.${NC} Бесконечный поиск ${BLUE}(Infinity Mode)${NC}"

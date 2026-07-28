@@ -33,7 +33,7 @@ show_updater_menu() {
         print_separator "─" 60
         
         local choice
-        choice=$(safe_read "Твой выбор" "") || return 130
+        choice=$(safe_read "Ваш выбор" "") || return 130
         
         if [[ "$choice" == "b" || "$choice" == "B" ]]; then
             break

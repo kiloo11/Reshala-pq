@@ -28,7 +28,7 @@ show_widgets_menu() {
     while true; do
         clear
         menu_header "🔧 УПРАВЛЕНИЕ ВИДЖЕТАМИ ДАШБОРДА"
-        printf_description "Здесь ты можешь включать/выключать отдельные виджеты"
+        printf_description "Включение и отключение отдельных виджетов"
         printf_description "и при необходимости сбросить их кеш для жёсткого обновления."
         echo ""
 
@@ -82,7 +82,7 @@ show_widgets_menu() {
         printf_menu_option "b" "🔙 Назад в главное меню"
         echo ""
         
-        local choice; choice=$(safe_read "Введи номер виджета для переключения, или букву: " "") || { _LAST_CTRLC_SIGNALED=0; break; }
+        local choice; choice=$(safe_read "Введите номер виджета для переключения или букву: " "") || { _LAST_CTRLC_SIGNALED=0; break; }
         
         if [[ "$choice" == "b" || "$choice" == "B" ]]; then
             break

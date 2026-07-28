@@ -167,7 +167,7 @@ run_cmd() {
     elif command -v sudo &>/dev/null; then
         sudo "$@"
     else
-        err "Команда 'sudo' не найдена. Запусти скрипт от имени root."
+        err "Команда 'sudo' не найдена. Запустите скрипт от имени root."
         return 1
     fi
 }
@@ -330,11 +330,11 @@ ask_float_in_range() {
         if [[ "$value" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
             # Проверяем диапазон через bc
             if (( $(echo "$value < $min" | bc -l) )); then
-                err "Введи число >= ${min}."
+                err "Введите число не меньше ${min}."
                 continue
             fi
             if (( $(echo "$value > $max" | bc -l) )); then
-                err "Введи число <= ${max}."
+                err "Введите число не больше ${max}."
                 continue
             fi
             echo "$value"
@@ -373,7 +373,7 @@ ask_selection() {
     done
     
     local choice
-    choice=$(ask_number_in_range "Твой выбор" 1 "$cnt" "") || return 130
+    choice=$(ask_number_in_range "Ваш выбор" 1 "$cnt" "") || return 130
     # Возвращаем индекс (1-based) в stdout
     echo "$choice"
     return 0
@@ -504,7 +504,7 @@ ensure_package() {
         elif command -v yum &>/dev/null; then
             run_cmd yum install -y "$package_name"
         else
-            err "Не могу установить '${package_name}'. Сделай это вручную."
+            err "Не удалось установить '${package_name}'. Установите его вручную."
             return 1
         fi
     fi
@@ -566,7 +566,7 @@ get_env_var() {
 }
 
 wait_for_enter() {
-    read -rp $'\nНажми Enter, чтобы продолжить...' || return 130
+    read -rp $'\nНажмите Enter, чтобы продолжить...' || return 130
 }
 
 # --- Логи (legacy wrappers) ---

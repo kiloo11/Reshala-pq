@@ -184,7 +184,7 @@ show_updater_config_menu() {
         
         echo -e "  ${C_YELLOW}Текущие сервисы в очереди обновления:${C_RESET}"
         if [ ${#UPDATER_PATHS[@]} -eq 0 ]; then
-            echo -e "  ${C_GRAY}Пусто. Запусти сканирование или добавь вручную.${C_RESET}"
+            echo -e "  ${C_GRAY}Пусто. Запустите сканирование или добавьте вручную.${C_RESET}"
         else
             for i in "${!UPDATER_PATHS[@]}"; do
                 printf "  %b[%d]%b %-35s %b[%s]%b\n" "${C_YELLOW}" "$((i+1))" "${C_RESET}" "${UPDATER_PATHS[$i]}" "${C_GREEN}" "${UPDATER_STRATEGIES[$i]}" "${C_RESET}"
@@ -236,7 +236,7 @@ show_updater_config_menu() {
             3)
                 if [ ${#UPDATER_PATHS[@]} -gt 0 ]; then
                     local idx
-                    idx=$(ask_number_in_range "Введи номер для удаления (0 для отмены)" 0 "${#UPDATER_PATHS[@]}") || continue
+                    idx=$(ask_number_in_range "Введите номер для удаления (0 для отмены)" 0 "${#UPDATER_PATHS[@]}") || continue
                     if [[ "$idx" -gt 0 ]]; then
                         local real_idx=$((idx-1))
                         unset 'UPDATER_PATHS[real_idx]'
@@ -255,7 +255,7 @@ show_updater_config_menu() {
             4)
                 if [ ${#UPDATER_PATHS[@]} -gt 0 ]; then
                     local idx
-                    idx=$(ask_number_in_range "Введи номер для изменения (0 для отмены)" 0 "${#UPDATER_PATHS[@]}") || continue
+                    idx=$(ask_number_in_range "Введите номер для изменения (0 для отмены)" 0 "${#UPDATER_PATHS[@]}") || continue
                     if [[ "$idx" -gt 0 ]]; then
                         local real_idx=$((idx-1))
                         local current_strat="${UPDATER_STRATEGIES[real_idx]}"

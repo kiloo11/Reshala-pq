@@ -159,7 +159,7 @@ _deploy_key_to_host() {
     printf "   👉 %s@%s:%s... " "$user" "$ip" "$port"
     # Сначала пробуем тихо войти по ключу, вдруг доступ уже есть
     if ssh -q -F /dev/null -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=3 -o StrictHostKeyChecking=accept-new -i "$key_path" -p "$port" "${user}@${ip}" exit; then
-        ok "ДОСТУП ЕСТЬ!"
+        ok "Доступ подтверждён."
         return 0
     fi
 
@@ -229,7 +229,7 @@ _select_existing_ssh_key() {
     clear >&2
     menu_header "🔑 ВЫБОР СУЩЕСТВУЮЩЕГО SSH КЛЮЧА" >&2
     echo "" >&2
-    printf_description "Выбери один из доступных ключей, или [b] Назад для отмены." >&2
+    printf_description "Выберите один из доступных ключей или [b] для отмены." >&2
     echo "" >&2
     print_separator "-" 50 >&2
 
@@ -276,7 +276,7 @@ _select_existing_ssh_key() {
     echo "" >&2
 
     local choice_num
-    choice_num=$(safe_read "Выбери номер ключа: ") || return 1
+    choice_num=$(safe_read "Выберите номер ключа: ") || return 1
 
     if [[ "$choice_num" == "b" || "$choice_num" == "B" ]]; then
         return 1 # User chose to go back
@@ -297,8 +297,8 @@ _delete_ssh_key() {
     local key_path="$1"
     local key_description="$2"
     
-    printf_warning "Ты пытаешься удалить ключ: %s (%s)" "$key_description" "$key_path"
-    if ask_yes_no "Ты ТОЧНО хочешь удалить этот ключ? (y/n): " "n"; then
+    printf_warning "Будет удалён ключ: %s (%s)" "$key_description" "$key_path"
+    if ask_yes_no "Подтвердите удаление ключа (y/n): " "n"; then
         if [ -f "$key_path" ]; then
             rm -f "$key_path" # Delete private key
             printf_ok "Приватный ключ удален: %s" "$key_path"
@@ -350,13 +350,13 @@ _import_ssh_key() {
     local tmp_file; tmp_file=$(mktemp)
     
     printf_info "Сейчас откроется редактор 'nano'."
-    printf_description "1. Вставь содержимое своего ПРИВАТНОГО ключа."
-    printf_description "2. Нажми Ctrl+O, затем Enter (Сохранить)."
-    printf_description "3. Нажми Ctrl+X (Выйти)."
+    printf_description "1. Вставьте содержимое ПРИВАТНОГО ключа."
+    printf_description "2. Нажмите Ctrl+O, затем Enter (сохранить)."
+    printf_description "3. Нажмите Ctrl+X (выйти)."
     echo ""
     printf_warning "ВНИМАНИЕ: Обязательно вставляй ключ целиком, включая BEGIN/END строки."
     
-    wait_for_enter "Нажми Enter, чтобы открыть редактор..."
+    wait_for_enter "Нажмите Enter, чтобы открыть редактор..."
     
     nano "$tmp_file"
 

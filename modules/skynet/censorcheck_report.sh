@@ -102,11 +102,11 @@ _skynet_censorcheck_configure_telegram() {
     clear
     menu_header "📡 Настройка Telegram"
     echo ""
-    printf_description "1. Напиши @BotFather в Telegram и создай бота — получишь TG_BOT_TOKEN."
-    printf_description "2. Напиши созданному боту любое сообщение (например /start)."
-    printf_description "3. Открой в браузере (замени <TOKEN> на свой):"
+    printf_description "1. Напишите @BotFather в Telegram и создайте бота — получите TG_BOT_TOKEN."
+    printf_description "2. Отправьте созданному боту любое сообщение (например /start)."
+    printf_description "3. Откройте в браузере (замените <TOKEN> на свой):"
     printf_description "   https://api.telegram.org/bot<TOKEN>/getUpdates"
-    printf_description "4. Найди там \"chat\":{\"id\":ЧИСЛО — это твой TG_CHAT_ID."
+    printf_description "4. Найдите там \"chat\":{\"id\":ЧИСЛО — это ваш TG_CHAT_ID."
     echo ""
     printf_description "Хранится в ${C_CYAN}${RESHALA_ENV_FILE}${C_RESET} (права 600), не в общем конфиге."
     echo ""
@@ -138,9 +138,9 @@ _skynet_censorcheck_configure_telegram() {
 
     printf_info "Отправляю тестовое сообщение..."
     if _skynet_censorcheck_tg_send "✅ Решала: Telegram настроен. Сюда будут приходить отчёты «Блокировка ТСПУ»."; then
-        printf_ok "Готово! Проверь Telegram."
+        printf_ok "Готово. Проверьте Telegram."
     else
-        printf_error "Не удалось отправить тестовое сообщение. Проверь токен/chat_id."
+        printf_error "Не удалось отправить тестовое сообщение. Проверьте токен и chat_id."
     fi
     wait_for_enter
 }
@@ -177,7 +177,7 @@ _skynet_censorcheck_configure_ripe() {
     fi
 
     echo ""
-    printf_description "SNI, под который маскируется проверка (например, домен из твоего"
+    printf_description "SNI, под который маскируется проверка (например, домен из вашего"
     printf_description "Reality-конфига). По умолчанию как в исходном скрипте: max.ru"
     local sni; sni=$(ask_non_empty "SNI для пробы" "${TSPU_REALITY_SNI:-max.ru}") || return
 
