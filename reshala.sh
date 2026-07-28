@@ -8,7 +8,7 @@
 #
 # @menu.manifest
 #
-# @item( main | d | 🗑️  Снести Решалу | _reshala_uninstall_wrapper | 90 | 90 | Удаляет все файлы и конфигурацию Решалы. )
+# @item( main | d | 🗑️  Удалить Решалу | _reshala_uninstall_wrapper | 90 | 90 | Удаляет все файлы и конфигурацию Решалы. )
 #
 
 set -uo pipefail
@@ -26,7 +26,7 @@ export SCRIPT_DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 # что приводит к "chdir: error: getcwd: cannot access parent directories"
 cd "$SCRIPT_DIR" 2>/dev/null || cd / || true
 
-readonly VERSION="v3.137"
+readonly VERSION="v3.138"
 
 # ============================================================ #
 #              ПОДГОТОВКА И ЗАГРУЗКА КОМПОНЕНТОВ               #
@@ -111,7 +111,7 @@ run_module() {
 # Главное меню
 show_main_menu() {
     # Перехватываем Ctrl+C только в главном меню, чтобы вывести сообщение
-    trap 'printf "\n%b\n" "Для выхода из Решалы используй [q]." >&2' SIGINT
+    trap 'printf "\n%b\n" "Для выхода из Решалы нажмите [q]." >&2' SIGINT
 
     while true; do
         run_module ui/dashboard show
@@ -128,7 +128,7 @@ show_main_menu() {
             fi
         fi
         
-        printf "\n%s\n\n" "Чё делать будем, босс?"
+        printf "\n%s\n\n" "Выберите действие:"
         
         # 1. Рендерим все пункты меню из 'main'
         render_menu_items "main"
@@ -150,15 +150,15 @@ show_main_menu() {
         if [ "${SKYNET_MODE:-0}" -eq 1 ]; then
             printf_menu_option "q" "🔙 ВЕРНУТЬСЯ В ЦУП" "${C_CYAN}"
         else
-            printf_menu_option "q" "🚪 Выйти из решалы" "${C_CYAN}"
+            printf_menu_option "q" "🚪 Выйти из Решалы" "${C_CYAN}"
         fi
 
         print_separator "-" 60
 
         local choice
-        choice=$(safe_read "Твой выбор, босс") || {
+        choice=$(safe_read "Ваш выбор") || {
             _LAST_CTRLC_SIGNALED=0;
-            printf "\r\033[K%b" "${C_RED}🛑 Жми [q], чтобы выйти из главного меню!${C_RESET}\n";
+            printf "\r\033[K%b" "${C_RED}🛑 Для выхода из главного меню нажмите [q].${C_RESET}\n";
             continue;
         }
         
@@ -170,7 +170,7 @@ show_main_menu() {
         if [[ -n "$action" ]]; then
             # Спец-обработка для Skynet (запрет вложенности)
             if [[ "$choice" == "0" && "${SKYNET_MODE:-0}" -eq 1 ]]; then
-                printf_error "Ты уже в матрице."
+                printf_error "Вы уже находитесь в режиме агента."
             else
                 # Выполняем команду, собранную генератором.
                 # $action - это всегда "run_module <путь> <функция>" или "<функция>",
@@ -270,7 +270,7 @@ show_main_menu() {
                             _bbox "" ""
                             echo -e "  ${C_CYAN}╚${_leq}╝${C_RESET}"
                             echo ""
-                            echo -e "  👇 Нажми ${C_BOLD}[Enter]${C_RESET}, чтобы подтвердить и начать обновление..."
+                            echo -e "  👇 Нажмите ${C_BOLD}[Enter]${C_RESET}, чтобы подтвердить и начать обновление."
                             read -r _
                         fi
 
@@ -283,7 +283,7 @@ show_main_menu() {
                     if [ "${SKYNET_MODE:-0}" -eq 1 ]; then
                         exit 0
                     else
-                        echo "Был рад помочь. Не обосрись. 🥃"
+                        echo "Работа завершена. 🥃"
                         exit 0
                     fi
                     ;;
