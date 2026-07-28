@@ -87,10 +87,22 @@ def main():
         try:
             err_json = json.loads(body)
             err_obj = err_json.get("error", {})
-            detail = err_obj.get("detail") or err_obj.get("title") or body
+            # error.detail/title - общая обёртка ("There was a problem with
+            # your request"); реальная причина обычно в error.errors[] -
+            # списке ошибок по конкретным полям запроса.
+            field_errors = err_obj.get("errors") or []
+            if field_errors:
+                parts = []
+                for fe in field_errors:
+                    src = fe.get("source", {}).get("pointer", "") if isinstance(fe.get("source"), dict) else ""
+                    msg = fe.get("detail", "")
+                    parts.append(f"{src}: {msg}" if src else msg)
+                detail = "; ".join(p for p in parts if p) or body
+            else:
+                detail = err_obj.get("detail") or err_obj.get("title") or body
         except Exception:
             pass
-        detail = " ".join(detail.split())[:200]
+        detail = " ".join(detail.split())[:300]
         print(f"ERROR HTTP{e.code}:{detail}")
         return
     except Exception as e:
