@@ -128,7 +128,7 @@ _run_system_update() {
             printf_info "Пробую обновиться снова с архивных репозиториев..."
             if run_cmd apt-get update;
             then
-                printf_ok "ПОЛУЧИЛОСЬ! Запускаю полное обновление..."; run_cmd apt-get upgrade -y; run_cmd apt-get full-upgrade -y; run_cmd apt-get autoremove -y;
+                printf_ok "ПОЛУЧИЛОСЬ! Запускаю полное обновление..."; run_cmd apt-get upgrade -y; run_cmd apt-get full-upgrade -y; run_cmd apt-get autoremove -y; run_cmd apt-get autoclean -y;
                 printf_ok "EOL Fix сработал, всё обновлено. Живём!"; log "Обновление системы (EOL fix) успешно завершено."
             else
                 printf_error "Не прокатило. Пациент скорее мёртв. Возвращаю бэкап."; run_cmd cp "$backup_dir/sources.list" /etc/apt/; log "Обновление после EOL fix не удалось."
