@@ -340,12 +340,10 @@ _skynet_censorcheck_run_and_report() {
     local tmp_dir; tmp_dir=$(_skynet_tspu_check_fleet_parallel "$sni" "$RIPE_API_KEY")
     local count; count=$(cat "${tmp_dir}/.count" 2>/dev/null || echo 0)
 
-    # ✅ доступен - компактный список.
-    # ❌ заблокирован - сворачиваемая (expandable) цитата со списком и деталями.
-    # 🔍 пропуск (не удалось проверить) - отдельная сворачиваемая цитата,
-    # требует ручной проверки, не считается ни "доступен", ни "заблокирован".
+    # Все три группы - одинаковый вид: сворачиваемая (expandable) цитата
+    # с заголовком-счётчиком, внутри - КАЖДЫЙ сервер отдельной строкой.
     local ok_list="" fail_list="" skip_list=""
-    local total=0 blocked_n=0 skip_n=0 idx name result kind detail esc_name
+    local total=0 ok_n=0 blocked_n=0 skip_n=0 idx name result kind detail esc_name
 
     for ((idx = 1; idx <= count; idx++)); do
         name=$(cat "${tmp_dir}/${idx}.name" 2>/dev/null)
@@ -360,32 +358,36 @@ _skynet_censorcheck_run_and_report() {
 
         case "$kind" in
             AVAILABLE)
-                ok_list+="✅ ${esc_name}"$'\n'
+                ok_n=$((ok_n + 1))
+                ok_list+="• ${esc_name}"$'\n'
                 ;;
             BLOCKED)
                 blocked_n=$((blocked_n + 1))
-                fail_list+="${esc_name} — ${detail}"$'\n'
+                fail_list+="• ${esc_name} — ${detail}"$'\n'
                 ;;
             *)
                 skip_n=$((skip_n + 1))
-                skip_list+="${esc_name}${detail:+ — ${detail}}"$'\n'
+                skip_list+="• ${esc_name}${detail:+ — ${detail}}"$'\n'
                 ;;
         esac
     done
     rm -rf "$tmp_dir"
 
-    local report="🛡 <b>Блокировка ТСПУ — отчёт по флоту</b>"$'\n'"$(msk_date '+%Y-%m-%d %H:%M') МСК"$'\n\n'
-    report+="${ok_list}"
+    local report="<tg-emoji emoji-id=\"5474410313853998290\">💡</tg-emoji> <b>Блокировка ТСПУ — отчёт по флоту</b>"$'\n'"🕐 $(msk_date '+%Y-%m-%d %H:%M') МСК"$'\n\n'
+
+    if [[ -n "$ok_list" ]]; then
+        report+="<blockquote expandable>✅ <b>Доступно (${ok_n}):</b>"$'\n'"${ok_list}</blockquote>"$'\n'
+    fi
 
     if [[ -n "$fail_list" ]]; then
-        report+=$'\n'"<blockquote expandable>❌ Заблокированы (${blocked_n}):"$'\n'"${fail_list}</blockquote>"$'\n'
+        report+=$'\n'"<blockquote expandable>🚫 <b>Заблокировано (${blocked_n}):</b>"$'\n'"${fail_list}</blockquote>"$'\n'
     fi
 
     if [[ -n "$skip_list" ]]; then
-        report+=$'\n'"<blockquote expandable>🔍 Требуют ручной проверки (${skip_n}):"$'\n'"${skip_list}</blockquote>"$'\n'
+        report+=$'\n'"<blockquote expandable>🔍 <b>Требуют проверки (${skip_n}):</b>"$'\n'"${skip_list}</blockquote>"$'\n'
     fi
 
-    report+=$'\n'"Итого: ${total} серверов, ${blocked_n} заблокировано, ${skip_n} пропущено."
+    report+=$'\n'"Итого: ${total} серверов · ${blocked_n} заблокировано · ${skip_n} пропущено"
 
     if _skynet_censorcheck_tg_send "$report"; then
         [[ "$verbose" -eq 1 ]] && printf_ok "Отчёт отправлен в Telegram (${total} серверов, ${blocked_n} заблокировано, ${skip_n} пропущено)."
