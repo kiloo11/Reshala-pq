@@ -430,13 +430,22 @@ REMOTE_SCRIPT
         }
 
         printf "   📡 Проверка агента... "
-        local remote_ver_cmd="grep 'readonly VERSION' $INSTALL_PATH 2>/dev/null | cut -d'\"' -f2"
+        # Версию читаем из самого скрипта, а не из $INSTALL_PATH: install_script
+        # кладёт в /usr/local/bin/reshala wrapper-лаунчер, в котором строки
+        # VERSION нет вовсе. Версия получалась пустой, и агент разворачивался
+        # заново при каждом заходе на ноду.
+        local remote_ver_cmd="grep 'readonly VERSION' /opt/reshala/reshala.sh 2>/dev/null | cut -d'\"' -f2"
         local remote_ver; remote_ver=$(run_remote "$remote_ver_cmd" | tail -n1 | tr -d '\r')
 
         if [[ -z "$remote_ver" ]] || _skynet_is_local_newer "$VERSION" "$remote_ver"; then
             warn "Требуется установка/обновление агента..."
             # Экспортируем переменную, чтобы она была доступна для `bash /tmp/i.sh` даже внутри `sudo bash -c '...'`
-            local install_cmd="export RESHALA_NO_AUTOSTART=1; wget -qO /tmp/i.sh ${INSTALLER_URL_RAW} && bash /tmp/i.sh"
+            # Качаем wget'ом, с откатом на curl: если у ноды объявлен IPv6 без
+            # рабочего маршрута, wget берёт первый адрес и висит до таймаута,
+            # а curl умеет happy eyeballs и уходит на IPv4. Пустой файл после
+            # неудачи тоже проблема — wget -O создаёт его до проверки ответа,
+            # и bash на нём молча выходит с кодом 0, будто установка прошла.
+            local install_cmd="export RESHALA_NO_AUTOSTART=1; { wget -q -T 15 -O /tmp/i.sh ${INSTALLER_URL_RAW} || curl -sSL --fail --connect-timeout 15 -o /tmp/i.sh ${INSTALLER_URL_RAW}; } && [ -s /tmp/i.sh ] && bash /tmp/i.sh"
             if ! run_remote "$install_cmd"; then err "Не удалось развернуть агента."; wait_for_enter; return; fi
             ok "Агент развёрнут."
         else
