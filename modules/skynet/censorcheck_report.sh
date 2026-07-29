@@ -376,15 +376,15 @@ _skynet_censorcheck_run_and_report() {
     local report="<tg-emoji emoji-id=\"5474410313853998290\">💡</tg-emoji> <b>Блокировка ТСПУ — отчёт по флоту</b>"$'\n'"🕐 $(msk_date '+%Y-%m-%d %H:%M') МСК"$'\n\n'
 
     if [[ -n "$ok_list" ]]; then
-        report+="<blockquote expandable>✅ <b>Доступно (${ok_n}):</b>"$'\n'"${ok_list}</blockquote>"$'\n'
+        report+="<blockquote expandable><tg-emoji emoji-id=\"5316852707070327820\">✅</tg-emoji> <b>Доступно (${ok_n}):</b>"$'\n'"${ok_list}</blockquote>"$'\n'
     fi
 
     if [[ -n "$fail_list" ]]; then
-        report+=$'\n'"<blockquote expandable>🚫 <b>Заблокировано (${blocked_n}):</b>"$'\n'"${fail_list}</blockquote>"$'\n'
+        report+=$'\n'"<blockquote expandable><tg-emoji emoji-id=\"5258190433128834075\">👎</tg-emoji> <b>Заблокировано (${blocked_n}):</b>"$'\n'"${fail_list}</blockquote>"$'\n'
     fi
 
     if [[ -n "$skip_list" ]]; then
-        report+=$'\n'"<blockquote expandable>🔍 <b>Требуют проверки (${skip_n}):</b>"$'\n'"${skip_list}</blockquote>"$'\n'
+        report+=$'\n'"<blockquote expandable><tg-emoji emoji-id=\"5242222002420346059\">⬇️</tg-emoji> <b>Требуют проверки (${skip_n}):</b>"$'\n'"${skip_list}</blockquote>"$'\n'
     fi
 
     report+=$'\n'"Итого: ${total} серверов · ${blocked_n} заблокировано · ${skip_n} пропущено"
