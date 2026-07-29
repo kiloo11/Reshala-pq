@@ -376,7 +376,7 @@ _skynet_censorcheck_run_and_report() {
     local report="<tg-emoji emoji-id=\"5474410313853998290\">💡</tg-emoji> <b>Блокировка ТСПУ — отчёт по флоту</b>"$'\n\n'"<tg-emoji emoji-id=\"5296588050640420683\">🕘</tg-emoji> $(msk_date '+%Y-%m-%d %H:%M') МСК"$'\n'
 
     if [[ -n "$ok_list" ]]; then
-        report+="<blockquote expandable><tg-emoji emoji-id=\"5316852707070327820\">✅</tg-emoji> <b>Доступно (${ok_n}):</b>"$'\n'"${ok_list}</blockquote>"$'\n'
+        report+="<blockquote expandable><tg-emoji emoji-id=\"5258053251873400722\">✅</tg-emoji> <b>Доступно (${ok_n}):</b>"$'\n'"${ok_list}</blockquote>"$'\n'
     fi
 
     if [[ -n "$fail_list" ]]; then
