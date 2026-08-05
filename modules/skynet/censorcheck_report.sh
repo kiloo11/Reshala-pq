@@ -1,24 +1,37 @@
 #!/bin/bash
 # ============================================================ #
-# ==   SKYNET: ЕЖЕДНЕВНЫЙ ОТЧЁТ "БЛОКИРОВКА ТСПУ" В TELEGRAM == #
+# ==      SKYNET: ОТЧЁТ "БЛОКИРОВКА ТСПУ" В TELEGRAM         == #
 # ============================================================ #
 #
-# Ежедневно проверяет доступность IP каждого сервера флота из сетей
-# российских операторов через реальные зонды RIPE Atlas (тот же метод
-# измерения, что в публичном censorcheck.tlab.pw, но со своим API-ключом -
-# см. _skynet_tspu_check_one() и tspu_probe.py). Проверка бьёт напрямую по
-# IP из базы флота, без захода на сам сервер по SSH. Присылает сводный
-# отчёт в Telegram. Работает и из TUI (настройка/ручной запуск), и
-# headless из cron (см. reshala.sh -> censorcheck-report).
+# По расписанию (несколько раз в день) проверяет доступность IP каждого
+# сервера флота из сетей российских операторов через реальные зонды
+# RIPE Atlas (тот же метод измерения, что в публичном censorcheck.tlab.pw,
+# но со своим API-ключом - см. _skynet_tspu_check_one() и tspu_probe.py).
+# Проверка бьёт напрямую по IP из базы флота, без захода на сам сервер
+# по SSH. Присылает сводный отчёт в Telegram. Работает и из TUI
+# (настройка/ручной запуск), и headless из cron
+# (см. reshala.sh -> censorcheck-report).
 #
 # @menu.manifest
-# @item( skynet | t | ${C_RED}📡 Отчёт "Блокировка ТСПУ" в Telegram${C_RESET} | _skynet_censorcheck_menu | 50 | 2 | Ежедневная проверка блокировок ТСПУ по флоту через RIPE Atlas с отчётом в Telegram. )
+# @item( skynet | t | ${C_RED}📡 Отчёт "Блокировка ТСПУ" в Telegram${C_RESET} | _skynet_censorcheck_menu | 50 | 2 | Проверка блокировок ТСПУ по флоту через RIPE Atlas по расписанию с отчётом в Telegram. )
 #
 
 [[ "${BASH_SOURCE[0]}" == "${0}" ]] && exit 1 # Защита от прямого запуска
 
 _CENSORCHECK_CRON_FILE="/etc/cron.d/reshala-censorcheck"
 _TSPU_PROBE_SCRIPT="${SCRIPT_DIR}/modules/skynet/tspu_probe.py"
+
+# Сколько проверок в день считаем нормой. Дальше добавлять можно, но со
+# спросом: каждый прогон создаёт _CENSORCHECK_ROUNDS измерений RIPE Atlas на
+# КАЖДЫЙ сервер флота (кредиты не бесконечные) и присылает ещё одно
+# сообщение в Telegram.
+_CENSORCHECK_SOFT_LIMIT=4
+
+# Сколько замеров подряд делать по каждому серверу за один прогон. Вердикт
+# ставится по большинству (см. _skynet_tspu_check_one): чтобы уехать в
+# "Заблокировано", сервер должен недобрать проценты минимум в двух замерах.
+# Меньше трёх смысла не имеет - подтверждать промах будет нечем.
+_CENSORCHECK_ROUNDS="${TSPU_PROBE_ROUNDS:-3}"
 
 # Время запуска и отметка в отчёте — московские (RESHALA_TZ и
 # RESHALA_TZ_OFFSET_MIN из config/reshala.conf), а не по часовому поясу
@@ -204,12 +217,11 @@ _skynet_censorcheck_configure_ripe() {
 # заходить на сам сервер, IP уже есть в базе флота. Поэтому эта часть
 # выполняется локально с контрольного хоста, параллельно по всем серверам.
 
-# Проверяет один IP: доступность порта 443 + опрос RIPE Atlas.
+# ОДИН замер по IP: доступность порта 443 + опрос RIPE Atlas.
 # Печатает ОДНУ строку вида:
-#   AVAILABLE <детали>
-#   BLOCKED <детали>
+#   OK <percent> <success> <total> [<asn>:<cnt> ...]
 #   SKIP <причина>
-_skynet_tspu_check_one() {
+_skynet_tspu_probe_once() {
     local ip="$1" sni="$2" api_key="$3"
 
     # Без реально слушающего 443 RIPE Atlas всё равно покажет "заблокировано"
@@ -240,24 +252,94 @@ _skynet_tspu_check_one() {
     local percent=0
     [[ "${total:-0}" -gt 0 ]] && percent=$(( success * 100 / total ))
 
-    local blockers=""
+    local asns=""
     local blocked_asn_line; blocked_asn_line=$(echo "$py_out" | grep "^BLOCKED_ASN" | head -1)
-    if [[ -n "$blocked_asn_line" ]]; then
-        local parts="${blocked_asn_line#BLOCKED_ASN }"
-        local part asn cnt name
-        for part in $parts; do
-            asn="${part%%:*}"; cnt="${part##*:}"
-            name="${_TSPU_ASN_NAMES[$asn]:-AS$asn}"
-            blockers+="${name}(${cnt}), "
+    [[ -n "$blocked_asn_line" ]] && asns="${blocked_asn_line#BLOCKED_ASN }"
+
+    echo "OK ${percent} ${success} ${total}${asns:+ ${asns}}"
+}
+
+# Итог по одному серверу: _CENSORCHECK_ROUNDS замеров подряд с усреднением.
+# Печатает ОДНУ строку вида:
+#   AVAILABLE [детали]
+#   BLOCKED <детали>
+#   SKIP <причина>
+#
+# Почему не один замер: зонды RIPE Atlas живут в реальных домашних сетях и
+# отваливаются сами по себе - разовый недобор процентов это чаще шум, чем
+# ТСПУ. В "Заблокировано" уезжает только то, что повторилось минимум в двух
+# замерах; одиночный промах остаётся в "Доступно" с пометкой.
+_skynet_tspu_check_one() {
+    local ip="$1" sni="$2" api_key="$3"
+    local rounds="$_CENSORCHECK_ROUNDS"
+
+    local -a percents=()
+    local -A asn_rounds=()      # ASN -> в скольких замерах он резал трафик
+    local measured=0 misses=0 last_skip=""
+    local r out _tag percent success total rest part asn
+
+    for ((r = 1; r <= rounds; r++)); do
+        out=$(_skynet_tspu_probe_once "$ip" "$sni" "$api_key")
+        if [[ "${out%% *}" != "OK" ]]; then
+            last_skip="${out#SKIP }"
+            continue
+        fi
+        read -r _tag percent success total rest <<< "$out"
+        measured=$((measured + 1))
+        percents+=("$percent")
+        [[ "$percent" -lt 100 ]] && misses=$((misses + 1))
+        for part in $rest; do
+            asn="${part%%:*}"
+            asn_rounds[$asn]=$(( ${asn_rounds[$asn]:-0} + 1 ))
         done
-        blockers="${blockers%, }"
+    done
+
+    if [[ "$measured" -eq 0 ]]; then
+        echo "SKIP ${last_skip:-ни один из ${rounds} замеров не удался}"
+        return
     fi
 
-    if [[ "$percent" -eq 100 ]]; then
-        echo "AVAILABLE зондов: ${total}, все достучались"
-    else
-        echo "BLOCKED доступно ${percent}% (${success}/${total})${blockers:+, блокируют: ${blockers}}"
+    local sum=0 p
+    for p in "${percents[@]}"; do sum=$((sum + p)); done
+    local avg=$(( sum / measured ))
+
+    local seq; seq=$(printf '%s%%/' "${percents[@]}"); seq="${seq%/}"
+    local partial=""
+    [[ "$measured" -lt "$rounds" ]] && partial=" · удалось ${measured} из ${rounds} замеров"
+
+    if [[ "$misses" -eq 0 ]]; then
+        echo "AVAILABLE${partial:+ ${partial# · }}"
+        return
     fi
+
+    # Одиночный промах при единственном удавшемся замере подтвердить нечем -
+    # это не "доступно" и не "заблокировано", а повод посмотреть руками.
+    if [[ "$misses" -lt 2 && "$measured" -lt 2 ]]; then
+        echo "SKIP единственный удавшийся замер показал ${avg}% доступности, остальные не удались (${last_skip})"
+        return
+    fi
+
+    if [[ "$misses" -lt 2 ]]; then
+        echo "AVAILABLE промах в 1 замере из ${measured} (${seq}) — считаем случайным${partial}"
+        return
+    fi
+
+    # В список блокирующих операторов пускаем только тех, кто повторился:
+    # ASN, мелькнувший в одном замере из трёх, - такой же шум, как и сам промах.
+    local blockers="" cnt name sorted
+    sorted=$(
+        for asn in "${!asn_rounds[@]}"; do
+            [[ "${asn_rounds[$asn]}" -ge 2 ]] || continue
+            printf '%s\t%s\n' "${asn_rounds[$asn]}" "${_TSPU_ASN_NAMES[$asn]:-AS$asn}"
+        done | sort -k1,1nr -k2,2
+    )
+    while IFS=$'\t' read -r cnt name; do
+        [[ -n "$name" ]] || continue
+        blockers+="${name}(${cnt}/${measured}), "
+    done <<< "$sorted"
+    blockers="${blockers%, }"
+
+    echo "BLOCKED доступно в среднем ${avg}% (замеры: ${seq})${blockers:+, блокируют: ${blockers}}${partial}"
 }
 
 # Запускает проверку ТСПУ на всех серверах флота ПАРАЛЛЕЛЬНО (без SSH,
@@ -335,7 +417,10 @@ _skynet_censorcheck_run_and_report() {
 
     local sni="${TSPU_REALITY_SNI:-max.ru}"
 
-    [[ "$verbose" -eq 1 ]] && printf_info "Проверяю доступность всех серверов флота из сетей РФ (RIPE Atlas, параллельно)..."
+    if [[ "$verbose" -eq 1 ]]; then
+        printf_info "Проверяю доступность всех серверов флота из сетей РФ (RIPE Atlas, параллельно)."
+        printf_info "По каждому серверу ${_CENSORCHECK_ROUNDS} замера подряд с усреднением — это займёт пару минут."
+    fi
 
     local tmp_dir; tmp_dir=$(_skynet_tspu_check_fleet_parallel "$sni" "$RIPE_API_KEY")
     local count; count=$(cat "${tmp_dir}/.count" 2>/dev/null || echo 0)
@@ -358,8 +443,10 @@ _skynet_censorcheck_run_and_report() {
 
         case "$kind" in
             AVAILABLE)
+                # Деталь у доступного сервера появляется только когда есть что
+                # сказать: одиночный промах или неполный набор замеров.
                 ok_n=$((ok_n + 1))
-                ok_list+="• ${esc_name}"$'\n'
+                ok_list+="• ${esc_name}${detail:+ — ${detail}}"$'\n'
                 ;;
             BLOCKED)
                 blocked_n=$((blocked_n + 1))
@@ -373,7 +460,7 @@ _skynet_censorcheck_run_and_report() {
     done
     rm -rf "$tmp_dir"
 
-    local report="<tg-emoji emoji-id=\"5474410313853998290\">💡</tg-emoji> <b>Блокировка ТСПУ — отчёт по флоту</b>"$'\n\n'"<tg-emoji emoji-id=\"5296588050640420683\">🕘</tg-emoji> $(msk_date '+%Y-%m-%d %H:%M') МСК"$'\n'
+    local report="<tg-emoji emoji-id=\"5474410313853998290\">💡</tg-emoji> <b>Блокировка ТСПУ — отчёт по флоту</b>"$'\n\n'"<tg-emoji emoji-id=\"5296588050640420683\">🕘</tg-emoji> $(msk_date '+%Y-%m-%d %H:%M') МСК"$'\n'"<i>Замеров на сервер: ${_CENSORCHECK_ROUNDS}, вердикт по большинству</i>"$'\n'
 
     if [[ -n "$ok_list" ]]; then
         report+="<blockquote expandable><tg-emoji emoji-id=\"5258053251873400722\">✅</tg-emoji> <b>Доступно (${ok_n}):</b>"$'\n'"${ok_list}</blockquote>"$'\n'
@@ -440,44 +527,131 @@ _skynet_censorcheck_msk_to_local() {
     echo "$(( total / 60 )) $(( total % 60 ))"
 }
 
-_skynet_censorcheck_install_cron() {
-    local hour minute
-    hour=$(ask_number_in_range "Час запуска по Москве (0-23)" 0 23 "9") || return
-    minute=$(ask_number_in_range "Минута запуска (0-59)" 0 59 "0") || return
+# Времена запусков (МСК, "HH:MM") — по одному на строку, по возрастанию.
+# Источник правды — строки "# reshala-msk-time": по полям cron время
+# пользователя уже не восстановить (мы могли перевести его в зону сервера).
+# Формат тот же, что был у версии с одним запуском в день, — расписание,
+# заданное до этой правки, читается как обычное расписание из одного пункта.
+_skynet_censorcheck_times() {
+    [[ -f "$_CENSORCHECK_CRON_FILE" ]] || return 0
+    sed -n 's/^# reshala-msk-time //p' "$_CENSORCHECK_CRON_FILE" 2>/dev/null | sort -u
+}
+
+# Перезаписывает cron-файл под переданный список времён "HH:MM" (МСК).
+# Пустой список = расписание выключено, файл удаляется.
+_skynet_censorcheck_write_cron() {
+    if [[ $# -eq 0 ]]; then
+        rm -f "$_CENSORCHECK_CRON_FILE"
+        return 0
+    fi
 
     local exec_path; exec_path=$(_skynet_censorcheck_cron_exec_path)
-    local msk_time; msk_time=$(printf '%02d:%02d' "$hour" "$minute")
 
     # Поля cron считаются в часовом поясе сервера. Либо просим считать по Москве
     # сам cron (CRON_TZ), либо, если он этого не умеет, переводим время сами.
-    local tz_line cron_hour="$hour" cron_minute="$minute"
-    if _skynet_censorcheck_cron_has_tz; then
+    local has_tz=0
+    _skynet_censorcheck_cron_has_tz && has_tz=1
+
+    local tz_line
+    if [[ "$has_tz" -eq 1 ]]; then
         tz_line="CRON_TZ=${RESHALA_TZ}"
     else
-        read -r cron_hour cron_minute <<< "$(_skynet_censorcheck_msk_to_local "$hour" "$minute")"
-        tz_line="# Этот cron не понимает CRON_TZ, поэтому ${msk_time} МСК записаны ниже"$'\n'"# как $(printf '%02d:%02d' "$cron_hour" "$cron_minute") по времени сервера."
+        tz_line="# Этот cron не понимает CRON_TZ, поэтому поля времени ниже записаны"$'\n'"# по часовому поясу сервера, а не по Москве (МСК — в комментариях)."
     fi
 
-    # Строка "# reshala-msk-time" — источник правды для меню: по полям cron
-    # уже не видно, какое время просил пользователь.
+    local body="" t hour minute cron_hour cron_minute
+    while IFS= read -r t; do
+        [[ -n "$t" ]] || continue
+        hour="${t%%:*}"; minute="${t##*:}"
+        if [[ "$has_tz" -eq 1 ]]; then
+            cron_hour="$hour"; cron_minute="$minute"
+        else
+            read -r cron_hour cron_minute <<< "$(_skynet_censorcheck_msk_to_local "$hour" "$minute")"
+        fi
+        # 10# — иначе "09" уедет в арифметику как восьмеричное и сломает запись.
+        body+="# reshala-msk-time ${t}"$'\n'
+        body+="$((10#$cron_minute)) $((10#$cron_hour)) * * * root ${exec_path} censorcheck-report >> ${LOGFILE} 2>&1"$'\n'
+    done < <(printf '%s\n' "$@" | sort -u)
+    body="${body%$'\n'}"   # завершающий перевод строки добавит сам heredoc
+
     cat > "$_CENSORCHECK_CRON_FILE" << EOF
-# Reshala: ежедневный отчёт "Блокировка ТСПУ" по флоту Skynet.
-# Управляется через: reshala -> 🌐 Skynet -> [t] -> [e]/[d].
-# reshala-msk-time ${msk_time}
+# Reshala: отчёт "Блокировка ТСПУ" по флоту Skynet.
+# Управляется через: reshala -> 🌐 Skynet -> [t] -> [e].
+# Один пункт расписания = пара строк: "# reshala-msk-time HH:MM" (что задал
+# пользователь, по Москве) и само задание cron.
 ${tz_line}
-${cron_minute} ${cron_hour} * * * root ${exec_path} censorcheck-report >> ${LOGFILE} 2>&1
+${body}
 EOF
     chmod 644 "$_CENSORCHECK_CRON_FILE"
-    printf_ok "Ежедневный отчёт запланирован на ${msk_time} по Москве."
+}
+
+_skynet_censorcheck_add_time() {
+    local -a times=(); mapfile -t times < <(_skynet_censorcheck_times)
+
+    local hour minute new
+    hour=$(ask_number_in_range "Час запуска по Москве (0-23)" 0 23 "9") || return
+    minute=$(ask_number_in_range "Минута запуска (0-59)" 0 59 "0") || return
+    new=$(printf '%02d:%02d' "$((10#$hour))" "$((10#$minute))")
+
+    local t
+    for t in ${times[@]+"${times[@]}"}; do
+        if [[ "$t" == "$new" ]]; then
+            printf_warning "Запуск в ${new} МСК уже есть в расписании."
+            sleep 1
+            return
+        fi
+    done
+
+    if (( ${#times[@]} >= _CENSORCHECK_SOFT_LIMIT )); then
+        echo ""
+        printf_warning "Сейчас проверок в день: ${#times[@]}."
+        printf_description "Каждый прогон — ${_CENSORCHECK_ROUNDS} измерения RIPE Atlas на каждый сервер"
+        printf_description "флота и ещё одно сообщение в Telegram. Норма — 3-4 раза в день."
+        echo ""
+        ask_yes_no "Всё равно добавить ${new} МСК?" "n" || return
+    fi
+
+    times+=("$new")
+    _skynet_censorcheck_write_cron "${times[@]}"
+    printf_ok "Добавлен запуск в ${new} МСК. Всего в расписании: ${#times[@]}."
     sleep 1
 }
 
-_skynet_censorcheck_remove_cron() {
+_skynet_censorcheck_remove_time() {
+    local -a times=(); mapfile -t times < <(_skynet_censorcheck_times)
+
+    if [[ ${#times[@]} -eq 0 ]]; then
+        printf_info "Расписание и так пустое."
+        sleep 1
+        return
+    fi
+
+    local idx
+    idx=$(ask_number_in_range "Номер запуска для удаления (1-${#times[@]}, 0 — отмена)" 0 "${#times[@]}" "0") || return
+    [[ "$((10#$idx))" -eq 0 ]] && return
+
+    local -a rest=()
+    local i
+    for i in "${!times[@]}"; do
+        [[ "$i" -eq $((10#$idx - 1)) ]] && continue
+        rest+=("${times[$i]}")
+    done
+
+    _skynet_censorcheck_write_cron ${rest[@]+"${rest[@]}"}
+    if [[ ${#rest[@]} -eq 0 ]]; then
+        printf_ok "Удалён последний пункт — автоматические проверки выключены."
+    else
+        printf_ok "Удалён запуск в ${times[$((10#$idx - 1))]} МСК. Осталось: ${#rest[@]}."
+    fi
+    sleep 1
+}
+
+_skynet_censorcheck_clear_cron() {
     if [[ -f "$_CENSORCHECK_CRON_FILE" ]]; then
         rm -f "$_CENSORCHECK_CRON_FILE"
-        printf_ok "Ежедневный отчёт выключен."
+        printf_ok "Расписание очищено, автоматические проверки выключены."
     else
-        printf_info "Ежедневный отчёт и так был выключен."
+        printf_info "Расписание и так было пустым."
     fi
     sleep 1
 }
@@ -486,12 +660,67 @@ _skynet_censorcheck_remove_cron() {
 #                          МЕНЮ                                #
 # ============================================================ #
 
+# Печатает список пунктов расписания в человекочитаемом виде для строки статуса:
+# "09:00, 15:00, 21:00 МСК".
+_skynet_censorcheck_times_inline() {
+    local -a times=(); mapfile -t times < <(_skynet_censorcheck_times)
+    [[ ${#times[@]} -eq 0 ]] && return
+    local joined; joined=$(printf '%s, ' "${times[@]}")
+    printf '%s МСК' "${joined%, }"
+}
+
+_skynet_censorcheck_schedule_menu() {
+    while true; do
+        clear
+        menu_header "🗓 Расписание проверок ТСПУ"
+        printf_description "Каждый пункт расписания — отдельный прогон по всему флоту"
+        printf_description "(${_CENSORCHECK_ROUNDS} замера на сервер, вердикт по большинству) с отдельным"
+        printf_description "отчётом в Telegram. Норма — 3-4 прогона в день."
+        echo ""
+
+        local -a times=(); mapfile -t times < <(_skynet_censorcheck_times)
+        if [[ ${#times[@]} -eq 0 ]]; then
+            if [[ -f "$_CENSORCHECK_CRON_FILE" ]]; then
+                # Файл есть, а разметки времени в нём нет: правили руками или он
+                # остался от версии без метки. Что там за время — не угадать.
+                printf_description "${C_YELLOW}Задание cron есть, но время в нём не размечено${C_RESET} —"
+                printf_description "задай расписание заново через [a], старое будет перезаписано."
+            else
+                printf_description "${C_RED}Расписание пустое${C_RESET} — автоматические проверки выключены."
+            fi
+        else
+            printf_description "Запусков в день: ${C_GREEN}${#times[@]}${C_RESET}"
+            local i
+            for i in "${!times[@]}"; do
+                printf_description "  $((i + 1)). ${C_GREEN}${times[$i]}${C_RESET} МСК"
+            done
+        fi
+        echo ""
+
+        printf_menu_option "a" "Добавить время"
+        printf_menu_option "x" "Удалить время"
+        printf_menu_option "c" "Очистить расписание (выключить проверки)"
+        echo ""
+        printf_menu_option "b" "Назад"
+        echo ""
+
+        local choice; choice=$(safe_read "Выбор: " "") || { _LAST_CTRLC_SIGNALED=0; continue; }
+        case "$choice" in
+            [aA]) _skynet_censorcheck_add_time ;;
+            [xX]) _skynet_censorcheck_remove_time ;;
+            [cC]) _skynet_censorcheck_clear_cron ;;
+            [bB]) break ;;
+            *) printf_error "Неверный выбор."; sleep 1 ;;
+        esac
+    done
+}
+
 _skynet_censorcheck_menu() {
     enable_graceful_ctrlc
     while true; do
         clear
         menu_header "📡 Отчёт «Блокировка ТСПУ» в Telegram"
-        printf_description "Ежедневно бьёт зондами RIPE Atlas (сети РФ-операторов) в IP"
+        printf_description "По расписанию бьёт зондами RIPE Atlas (сети РФ-операторов) в IP"
         printf_description "каждого сервера флота и присылает сводный отчёт в Telegram."
         echo ""
 
@@ -501,29 +730,25 @@ _skynet_censorcheck_menu() {
         local ripe_status="${C_RED}не настроен${C_RESET}"
         [[ -n "${RIPE_API_KEY:-}" ]] && ripe_status="${C_GREEN}настроен${C_RESET}"
 
-        local cron_status="${C_RED}выключен${C_RESET}"
-        if [[ -f "$_CENSORCHECK_CRON_FILE" ]]; then
-            local cron_time
-            cron_time=$(sed -n 's/^# reshala-msk-time //p' "$_CENSORCHECK_CRON_FILE" 2>/dev/null | head -1)
-            if [[ -n "$cron_time" ]]; then
-                cron_status="${C_GREEN}включен${C_RESET} (${cron_time} МСК)"
-            else
-                # Задание, записанное до перехода на московское время: там время
-                # сервера, и починится оно только пересохранением через [e].
-                cron_time=$(grep -oE '^[0-9]+ [0-9]+' "$_CENSORCHECK_CRON_FILE" 2>/dev/null | awk '{printf "%02d:%02d", $2, $1}')
-                cron_status="${C_GREEN}включен${C_RESET} (${cron_time:-?} по времени сервера — задай заново через [e])"
-            fi
+        local cron_status="${C_RED}пусто (проверки выключены)${C_RESET}"
+        local cron_times; cron_times=$(_skynet_censorcheck_times_inline)
+        local cron_count; cron_count=$(_skynet_censorcheck_times | grep -c .)
+        if [[ -n "$cron_times" ]]; then
+            cron_status="${C_GREEN}${cron_count} в день${C_RESET} (${cron_times})"
+        elif [[ -f "$_CENSORCHECK_CRON_FILE" ]]; then
+            # Задание, записанное до появления метки времени (или правленное
+            # руками): что там за время — не угадать, чинится пересозданием.
+            cron_status="${C_YELLOW}задание есть, время не размечено${C_RESET} — задай заново через [e]"
         fi
 
         printf_description "Telegram:          ${tg_status}"
         printf_description "RIPE Atlas ключ:   ${ripe_status}"
-        printf_description "Ежедневный запуск: ${cron_status}"
+        printf_description "Расписание:        ${cron_status}"
         echo ""
 
         printf_menu_option "n" "Настроить TG_BOT_TOKEN / TG_CHAT_ID"
         printf_menu_option "k" "Настроить RIPE Atlas API-ключ / SNI"
-        printf_menu_option "e" "Включить/изменить ежедневный запуск"
-        printf_menu_option "d" "Выключить ежедневный запуск"
+        printf_menu_option "e" "Расписание проверок (добавить/убрать время)"
         printf_menu_option "r" "Запустить проверку и отчёт СЕЙЧАС"
         echo ""
         printf_menu_option "b" "Назад"
@@ -533,8 +758,7 @@ _skynet_censorcheck_menu() {
         case "$choice" in
             [nN]) _skynet_censorcheck_configure_telegram ;;
             [kK]) _skynet_censorcheck_configure_ripe ;;
-            [eE]) _skynet_censorcheck_install_cron ;;
-            [dD]) _skynet_censorcheck_remove_cron ;;
+            [eE]) _skynet_censorcheck_schedule_menu ;;
             [rR])
                 if [[ -z "${TG_BOT_TOKEN:-}" || -z "${TG_CHAT_ID:-}" ]]; then
                     printf_error "Сначала настрой Telegram [n]."
