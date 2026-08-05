@@ -185,11 +185,62 @@ show_fleet_menu() {
     
     local tmp_dir; tmp_dir=$(mktemp -d)
     local pids=() # Массив для хранения PID-ов фоновых процессов
+    local auto_scan="on"
+    local raw_lines=()
+
+    # Экран рисуется дважды за проход: сразу после запуска фоновых проб
+    # (статусы ещё "...") и когда пробы ответили. Поэтому отрисовка вынесена
+    # в функцию — иначе второй вызов пришлось бы копировать целиком.
+    _fleet_render() {
+        clear
+        menu_header "🌐 SKYNET: ЦЕНТР УПРАВЛЕНИЯ ФЛОТОМ"
+        printf_description "Управление базой серверов и запуск команд на флоте."
+        printf "\n   Авто-скан SSH: ${C_YELLOW}%s${C_RESET} (переключить [s])\n\n" "$auto_scan"
+        info "📂 База данных: ${C_GRAY}${FLEET_DATABASE_FILE}${C_RESET}"; printf "\n"; print_separator "-"
+
+        if [ ${#raw_lines[@]} -eq 0 ]; then
+            printf_info "(Пусто)"
+        else
+            local i=1
+            local line name user ip port key_path sudo_pass
+            for line in "${raw_lines[@]}"; do
+                IFS='|' read -r name user ip port key_path sudo_pass <<< "$line"
+                local status_text=" выкл"
+                if [[ "$auto_scan" == "on" ]]; then
+                    if [[ -f "$tmp_dir/$i" ]]; then status_text=$(cat "$tmp_dir/$i"); else status_text="?"; fi
+                fi
+                local status_color="${C_YELLOW}"
+                case "$status_text" in
+                    # ON дополняем до трёх знаков: иначе при смене "..." на "ON"
+                    # весь столбец имён уезжает влево на один символ.
+                    "ON")  status_color="${C_GREEN}"; status_text="ON " ;;
+                    "OFF") status_color="${C_RED}" ;;
+                    "...") status_color="${C_CYAN}" ;;
+                esac
+                local kp_display="Master"; [[ "$key_path" == *"$SKYNET_UNIQUE_KEY_PREFIX"* ]] && kp_display="Unique"
+                local pass_icon=""; if [[ "$user" != "root" && -n "$sudo_pass" ]]; then pass_icon="🔑"; fi
+                printf "   [%d] [%b%s%b] %b%-15s%b -> %s@%s:%s [%s] %s\n" "$i" "$status_color" "$status_text" "${C_RESET}" "${C_WHITE}" "$name" "${C_RESET}" "$user" "$ip" "$port" "$kp_display" "$pass_icon"
+                ((i++))
+            done
+        fi
+
+        print_separator "-"; render_menu_items "skynet"; echo ""; printf_menu_option "b" "🔙  Назад"; print_separator "-"
+    }
+
+    # Есть ли ещё не ответившие пробы: файла нет или в нём заглушка "...".
+    _fleet_scan_pending() {
+        [[ "$auto_scan" == "on" ]] || return 1
+        local n
+        for ((n = 1; n <= ${#raw_lines[@]}; n++)); do
+            [[ -f "$tmp_dir/$n" ]] || return 0
+            [[ "$(<"$tmp_dir/$n")" == "..." ]] && return 0
+        done
+        return 1
+    }
 
     while true; do
-        clear
         _sanitize_fleet_database
-        local auto_scan; auto_scan=$(get_config_var "SKYNET_AUTO_SSH_SCAN" "on")
+        auto_scan=$(get_config_var "SKYNET_AUTO_SSH_SCAN" "on")
         mapfile -t raw_lines < <(grep . "$FLEET_DATABASE_FILE")
 
         if [[ "$auto_scan" == "on" && ${#raw_lines[@]} -gt 0 ]]; then
@@ -212,35 +263,22 @@ show_fleet_menu() {
             done
         fi
 
-        menu_header "🌐 SKYNET: ЦЕНТР УПРАВЛЕНИЯ ФЛОТОМ"
-        printf_description "Управление базой серверов и запуск команд на флоте."
-        printf "\n   Авто-скан SSH: ${C_YELLOW}%s${C_RESET} (переключить [s])\n\n" "$auto_scan"
-        info "📂 База данных: ${C_GRAY}${FLEET_DATABASE_FILE}${C_RESET}"; printf "\n"; print_separator "-"
-        
-        if [ ${#raw_lines[@]} -eq 0 ]; then
-            printf_info "(Пусто)"
-        else
-            local i=1
-            for line in "${raw_lines[@]}"; do
-                IFS='|' read -r name user ip port key_path sudo_pass <<< "$line"
-                local status_text=" выкл"
-                if [[ "$auto_scan" == "on" ]]; then
-                    if [[ -f "$tmp_dir/$i" ]]; then status_text=$(cat "$tmp_dir/$i"); else status_text="?"; fi
-                fi
-                local status_color="${C_YELLOW}"
-                case "$status_text" in
-                    "ON")  status_color="${C_GREEN}" ;;
-                    "OFF") status_color="${C_RED}" ;;
-                    "...") status_color="${C_CYAN}" ;;
-                esac
-                local kp_display="Master"; [[ "$key_path" == *"$SKYNET_UNIQUE_KEY_PREFIX"* ]] && kp_display="Unique"
-                local pass_icon=""; if [[ "$user" != "root" && -n "$sudo_pass" ]]; then pass_icon="🔑"; fi
-                printf "   [%d] [%b%s%b] %b%-15s%b -> %s@%s:%s [%s] %s\n" "$i" "$status_color" "$status_text" "${C_RESET}" "${C_WHITE}" "$name" "${C_RESET}" "$user" "$ip" "$port" "$kp_display" "$pass_icon"
-                ((i++))
+        _fleet_render
+
+        # Пробы уходят в фон, а safe_read блокирует до Enter — сам себя экран
+        # не перерисовывает, поэтому без этого ожидания статусы так и остались
+        # бы "..." до первого нажатия. Пробы ограничены timeout 3, ждём с запасом
+        # и рисуем список ещё раз, уже с ON/OFF.
+        if _fleet_scan_pending; then
+            local waited=0
+            while _fleet_scan_pending && (( waited < 60 )); do
+                # Пользователь уже печатает — не мешаем ему перерисовкой.
+                read -r -t 0 && break
+                sleep 0.1
+                ((waited++))
             done
+            _fleet_render
         fi
-        
-        print_separator "-"; render_menu_items "skynet"; echo ""; printf_menu_option "b" "🔙  Назад"; print_separator "-"
 
         local choice; choice=$(safe_read "Выбор (или номер сервера): " "") || break
         if [[ "$choice" =~ ^[0-9]+$ ]] && [ -n "${raw_lines[$((choice-1))]:-}" ]; then
@@ -250,6 +288,11 @@ show_fleet_menu() {
         else
             local action; action=$(get_menu_action "skynet" "$choice")
             if [[ -n "$action" ]]; then $action; else
+                # Пробы запускаются только там, где файла статуса нет. Без
+                # очистки Enter перерисовывал бы тот же результат первого скана,
+                # хотя обещает обновление.
+                rm -f -- "$tmp_dir"/* &>/dev/null || true
+                pids=()
                 info "Обновляю статусы..."; sleep 0.5
             fi
         fi
